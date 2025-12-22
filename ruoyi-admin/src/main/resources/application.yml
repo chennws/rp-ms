@@ -3,7 +3,7 @@ ruoyi:
   # 名称
   name: RuoYi
   # 版本
-  version: 3.9.1
+  version: 3.9.0
   # 版权年份
   copyrightYear: 2025
   # 文件路径 示例（ Windows配置D:/ruoyi/uploadPath，Linux配置 /home/ruoyi/uploadPath）
@@ -68,13 +68,13 @@ spring:
   # redis 配置
   redis:
     # 地址
-    host: localhost
+    host: 47.115.163.152
     # 端口，默认为6379
     port: 6379
     # 数据库索引
     database: 0
     # 密码
-    password:
+    password: 123
     # 连接超时时间
     timeout: 10s
     lettuce:
@@ -134,3 +134,10 @@ xss:
   excludes: /system/notice
   # 匹配链接
   urlPatterns: /system/*,/monitor/*,/tool/*
+
+# minIO配置
+minio:
+  endpoint: http://47.115.163.152:10001
+  accessKey: dWdDP8Lh2zwm3zodL6vU
+  secretKey: ABTJr41wWWUTczPVeyf089nWC8yfpAfJONVRIEim
+  bucketName: winter

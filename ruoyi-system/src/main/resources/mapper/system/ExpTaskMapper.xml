@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.system.mapper.ExpTaskMapper">
+    
+    <resultMap type="ExpTask" id="ExpTaskResult">
+        <result property="taskId"    column="task_id"    />
+        <result property="taskName"    column="task_name"    />
+        <result property="courseName"    column="course_name"    />
+        <result property="deptId"    column="dept_id"    />
+        <result property="deadline"    column="deadline"    />
+        <result property="status"    column="status"    />
+        <result property="createBy"    column="create_by"    />
+        <result property="createTime"    column="create_time"    />
+        <result property="updateBy"    column="update_by"    />
+        <result property="updateTime"    column="update_time"    />
+        <result property="remark"    column="remark"    />
+        <result property="reportFileUrl"    column="report_file_url"    />
+        <result property="deptName"    column="dept_name"    />
+    </resultMap>
+
+    <sql id="selectExpTaskVo">
+        select t.task_id, t.task_name, t.course_name, t.dept_id, t.deadline, t.status, t.create_by, t.create_time, t.update_by, t.update_time, t.remark, t.report_file_url,
+               d.dept_name
+        from exp_task t
+        left join sys_dept d on t.dept_id = d.dept_id
+    </sql>
+
+    <select id="selectExpTaskList" parameterType="ExpTask" resultMap="ExpTaskResult">
+        <include refid="selectExpTaskVo"/>
+        <where>  
+            <if test="taskName != null and taskName != '' and courseName != null and courseName != ''">
+                and (t.task_name like concat('%', #{taskName}, '%') or t.course_name like concat('%', #{courseName}, '%'))
+            </if>
+            <if test="taskName != null and taskName != '' and (courseName == null or courseName == '')">
+                and t.task_name like concat('%', #{taskName}, '%')
+            </if>
+            <if test="courseName != null and courseName != '' and (taskName == null or taskName == '')">
+                and t.course_name like concat('%', #{courseName}, '%')
+            </if>
+            <if test="deptId != null"> and t.dept_id = #{deptId}</if>
+            <if test="status != null and status != ''"> and t.status = #{status}</if>
+        </where>
+        order by t.create_time desc
+    </select>
+    
+    <select id="selectExpTaskByTaskId" parameterType="Long" resultMap="ExpTaskResult">
+        <include refid="selectExpTaskVo"/>
+        where t.task_id = #{taskId}
+    </select>
+        
+    <insert id="insertExpTask" parameterType="ExpTask" useGeneratedKeys="true" keyProperty="taskId">
+        insert into exp_task
+        <trim prefix="(" suffix=")" suffixOverrides=",">
+            <if test="taskName != null and taskName != ''">task_name,</if>
+            <if test="courseName != null and courseName != ''">course_name,</if>
+            <if test="deptId != null">dept_id,</if>
+            <if test="deadline != null">deadline,</if>
+            <if test="status != null">status,</if>
+            <if test="createBy != null and createBy != ''">create_by,</if>
+            <if test="remark != null">remark,</if>
+            <if test="reportFileUrl != null">report_file_url,</if>
+            create_time
+         </trim>
+        <trim prefix="values (" suffix=")" suffixOverrides=",">
+            <if test="taskName != null and taskName != ''">#{taskName},</if>
+            <if test="courseName != null and courseName != ''">#{courseName},</if>
+            <if test="deptId != null">#{deptId},</if>
+            <if test="deadline != null">#{deadline},</if>
+            <if test="status != null">#{status},</if>
+            <if test="createBy != null and createBy != ''">#{createBy},</if>
+            <if test="remark != null">#{remark},</if>
+            <if test="reportFileUrl != null">#{reportFileUrl},</if>
+            sysdate()
+         </trim>
+    </insert>
+
+    <update id="updateExpTask" parameterType="ExpTask">
+        update exp_task
+        <trim prefix="SET" suffixOverrides=",">
+            <if test="taskName != null and taskName != ''">task_name = #{taskName},</if>
+            <if test="courseName != null and courseName != ''">course_name = #{courseName},</if>
+            <if test="deptId != null">dept_id = #{deptId},</if>
+            <if test="deadline != null">deadline = #{deadline},</if>
+            <if test="status != null">status = #{status},</if>
+            <if test="updateBy != null and updateBy != ''">update_by = #{updateBy},</if>
+            <if test="remark != null">remark = #{remark},</if>
+            <if test="reportFileUrl != null">report_file_url = #{reportFileUrl},</if>
+            update_time = sysdate()
+        </trim>
+        where task_id = #{taskId}
+    </update>
+
+    <delete id="deleteExpTaskByTaskId" parameterType="Long">
+        delete from exp_task where task_id = #{taskId}
+    </delete>
+
+    <delete id="deleteExpTaskByTaskIds" parameterType="String">
+        delete from exp_task where task_id in 
+        <foreach item="taskId" collection="array" open="(" separator="," close=")">
+            #{taskId}
+        </foreach>
+    </delete>
+</mapper>
+
