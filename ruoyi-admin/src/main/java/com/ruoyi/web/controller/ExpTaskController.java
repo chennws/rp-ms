@@ -1,25 +1,29 @@
 package com.ruoyi.web.controller;
 
 import java.util.List;
+
 import javax.servlet.http.HttpServletResponse;
-import org.springframework.security.access.prepost.PreAuthorize;
+
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
-import org.springframework.web.bind.annotation.DeleteMapping;
-import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+
 import com.ruoyi.common.annotation.Log;
 import com.ruoyi.common.core.controller.BaseController;
 import com.ruoyi.common.core.domain.AjaxResult;
+import com.ruoyi.common.core.domain.model.LoginUser;
+import com.ruoyi.common.core.page.TableDataInfo;
 import com.ruoyi.common.enums.BusinessType;
+import com.ruoyi.common.utils.poi.ExcelUtil;
 import com.ruoyi.system.domain.ExpTask;
 import com.ruoyi.system.service.IExpTaskService;
-import com.ruoyi.common.utils.poi.ExcelUtil;
-import com.ruoyi.common.core.page.TableDataInfo;
 
 /**
  * 实验任务Controller
@@ -41,6 +45,17 @@ public class ExpTaskController extends BaseController
     @GetMapping("/list")
     public TableDataInfo list(ExpTask expTask)
     {
+        // 如果不是管理员，则根据当前用户的部门ID过滤任务
+        LoginUser loginUser = getLoginUser();
+        if (loginUser != null && loginUser.getUser() != null && !loginUser.getUser().isAdmin())
+        {
+            // 学生端：自动根据当前用户的部门ID查询相关任务
+            Long deptId = getDeptId();
+            if (deptId != null)
+            {
+                expTask.setDeptId(deptId);
+            }
+        }
         startPage();
         List<ExpTask> list = expTaskService.selectExpTaskList(expTask);
         return getDataTable(list);
@@ -54,8 +69,19 @@ public class ExpTaskController extends BaseController
     @PostMapping("/export")
     public void export(HttpServletResponse response, ExpTask expTask)
     {
+        // 如果不是管理员，则根据当前用户的部门ID过滤任务
+        LoginUser loginUser = getLoginUser();
+        if (loginUser != null && loginUser.getUser() != null && !loginUser.getUser().isAdmin())
+        {
+            // 学生端：自动根据当前用户的部门ID查询相关任务
+            Long deptId = getDeptId();
+            if (deptId != null)
+            {
+                expTask.setDeptId(deptId);
+            }
+        }
         List<ExpTask> list = expTaskService.selectExpTaskList(expTask);
-        ExcelUtil<ExpTask> util = new ExcelUtil<ExpTask>(ExpTask.class);
+        ExcelUtil<ExpTask> util = new ExcelUtil<>(ExpTask.class);
         util.exportExcel(response, list, "实验任务数据");
     }
 
