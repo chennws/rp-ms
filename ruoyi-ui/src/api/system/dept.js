@@ -17,6 +17,15 @@ export function listDeptExcludeChild(deptId) {
   })
 }
 
+// 查询部门列表（用于实验任务管理）
+export function listDeptForTask(query) {
+  return request({
+    url: '/system/dept/listForTask',
+    method: 'get',
+    params: query
+  })
+}
+
 // 查询部门详细
 export function getDept(deptId) {
   return request({

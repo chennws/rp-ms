@@ -40,6 +40,7 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
                 and t.course_name like concat('%', #{courseName}, '%')
             </if>
             <if test="deptId != null"> and t.dept_id = #{deptId}</if>
+            <if test="createBy != null and createBy != ''"> and t.create_by = #{createBy}</if>
             <if test="status != null and status != ''"> and t.status = #{status}</if>
         </where>
         order by t.create_time desc

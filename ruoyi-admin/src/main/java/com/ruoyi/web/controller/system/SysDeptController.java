@@ -58,6 +58,17 @@ public class SysDeptController extends BaseController
     }
 
     /**
+     * 获取部门列表（用于实验任务管理，仅需任务管理权限）
+     */
+    @PreAuthorize("@ss.hasAnyPermi('task:task:add,task:task:edit')")
+    @GetMapping("/listForTask")
+    public AjaxResult listForTask(SysDept dept)
+    {
+        List<SysDept> depts = deptService.selectDeptList(dept);
+        return success(depts);
+    }
+
+    /**
      * 根据部门编号获取详细信息
      */
     @PreAuthorize("@ss.hasPermi('system:dept:query')")

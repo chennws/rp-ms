@@ -21,6 +21,7 @@ import com.ruoyi.common.core.domain.AjaxResult;
 import com.ruoyi.common.core.domain.model.LoginUser;
 import com.ruoyi.common.core.page.TableDataInfo;
 import com.ruoyi.common.enums.BusinessType;
+import com.ruoyi.common.utils.SecurityUtils;
 import com.ruoyi.common.utils.poi.ExcelUtil;
 import com.ruoyi.system.domain.ExpTask;
 import com.ruoyi.system.service.IExpTaskService;
@@ -45,15 +46,26 @@ public class ExpTaskController extends BaseController
     @GetMapping("/list")
     public TableDataInfo list(ExpTask expTask)
     {
-        // 如果不是管理员，则根据当前用户的部门ID过滤任务
+        // 如果不是管理员，则根据用户类型进行过滤
         LoginUser loginUser = getLoginUser();
         if (loginUser != null && loginUser.getUser() != null && !loginUser.getUser().isAdmin())
         {
-            // 学生端：自动根据当前用户的部门ID查询相关任务
-            Long deptId = getDeptId();
-            if (deptId != null)
+            // 检查用户是否有新增任务权限，如果有则说明是教师
+            boolean isTeacher = SecurityUtils.hasPermi(loginUser.getPermissions(), "task:task:add");
+            
+            if (isTeacher)
             {
-                expTask.setDeptId(deptId);
+                // 教师端：只查询自己发布的任务
+                expTask.setCreateBy(getUsername());
+            }
+            else
+            {
+                // 学生端：根据当前用户的部门ID查询相关任务
+                Long deptId = getDeptId();
+                if (deptId != null)
+                {
+                    expTask.setDeptId(deptId);
+                }
             }
         }
         startPage();
@@ -69,15 +81,26 @@ public class ExpTaskController extends BaseController
     @PostMapping("/export")
     public void export(HttpServletResponse response, ExpTask expTask)
     {
-        // 如果不是管理员，则根据当前用户的部门ID过滤任务
+        // 如果不是管理员，则根据用户类型进行过滤
         LoginUser loginUser = getLoginUser();
         if (loginUser != null && loginUser.getUser() != null && !loginUser.getUser().isAdmin())
         {
-            // 学生端：自动根据当前用户的部门ID查询相关任务
-            Long deptId = getDeptId();
-            if (deptId != null)
+            // 检查用户是否有新增任务权限，如果有则说明是教师
+            boolean isTeacher = SecurityUtils.hasPermi(loginUser.getPermissions(), "task:task:add");
+            
+            if (isTeacher)
             {
-                expTask.setDeptId(deptId);
+                // 教师端：只导出自己发布的任务
+                expTask.setCreateBy(getUsername());
+            }
+            else
+            {
+                // 学生端：根据当前用户的部门ID查询相关任务
+                Long deptId = getDeptId();
+                if (deptId != null)
+                {
+                    expTask.setDeptId(deptId);
+                }
             }
         }
         List<ExpTask> list = expTaskService.selectExpTaskList(expTask);

@@ -143,7 +143,7 @@
 
 <script>
 import { listTask, getTask, delTask, addTask, updateTask } from "@/api/task/task"
-import { listDept } from "@/api/system/dept"
+import { listDeptForTask } from "@/api/system/dept"
 import { handleTree } from "@/utils/ruoyi"
 import Treeselect from "@riophae/vue-treeselect"
 import "@riophae/vue-treeselect/dist/vue-treeselect.css"
@@ -198,7 +198,6 @@ export default {
   },
   created() {
     this.getList()
-    this.getDeptTree()
   },
   methods: {
     /** 查询任务列表 */
@@ -220,9 +219,17 @@ export default {
     },
     /** 查询部门下拉树结构 */
     getDeptTree() {
-      listDept().then(response => {
+      // 如果已经加载过部门树，直接返回
+      if (this.deptOptions && this.deptOptions.length > 0) {
+        return
+      }
+      listDeptForTask().then(response => {
         const deptTree = handleTree(response.data, "deptId", "parentId")
         this.deptOptions = this.convertDeptTree(deptTree)
+      }).catch(error => {
+        // 权限不足时静默失败，不影响页面使用
+        console.warn('加载部门列表失败，可能没有权限:', error)
+        this.deptOptions = []
       })
     },
     /** 转换部门数据结构为treeselect格式 */
@@ -269,12 +276,14 @@ export default {
     /** 新增按钮操作 */
     handleAdd() {
       this.reset()
+      this.getDeptTree() // 在打开新增对话框时加载部门树
       this.open = true
       this.title = "发布新任务"
     },
     /** 修改按钮操作 */
     handleUpdate(row) {
       this.reset()
+      this.getDeptTree() // 在打开编辑对话框时加载部门树
       const taskId = row.taskId || this.ids
       getTask(taskId).then(response => {
         this.form = response.data
