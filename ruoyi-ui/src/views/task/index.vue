@@ -108,6 +108,9 @@
             style="width: 100%"
           />
         </el-form-item>
+        <el-form-item label="实验报告">
+          <file-upload v-model="form.reportFileUrl" :limit="1" :fileSize="10" :fileType="['doc', 'docx', 'pdf', 'txt']" action="/Task/upload" />
+        </el-form-item>
         <el-form-item label="备注">
           <el-input v-model="form.remark" type="textarea" placeholder="请输入备注" />
         </el-form-item>
@@ -147,10 +150,11 @@ import { listDeptForTask } from "@/api/system/dept"
 import { handleTree } from "@/utils/ruoyi"
 import Treeselect from "@riophae/vue-treeselect"
 import "@riophae/vue-treeselect/dist/vue-treeselect.css"
+import FileUpload from "@/components/FileUpload"
 
 export default {
   name: "Task",
-  components: { Treeselect },
+  components: { Treeselect, FileUpload },
   data() {
     return {
       // 遮罩层
@@ -259,7 +263,8 @@ export default {
         deptId: undefined,
         deadline: undefined,
         status: "0",
-        remark: undefined
+        remark: undefined,
+        reportFileUrl: undefined
       }
       this.resetForm("form")
     },
