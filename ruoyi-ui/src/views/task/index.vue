@@ -136,6 +136,14 @@
         </el-descriptions-item>
         <el-descriptions-item label="提交人数">{{ viewForm.submitCount || 0 }}/{{ viewForm.totalCount || 0 }}</el-descriptions-item>
         <el-descriptions-item label="备注">{{ viewForm.remark || '无' }}</el-descriptions-item>
+        <el-descriptions-item label="实验报告" v-if="viewForm.reportFileUrl">
+          <el-button
+            type="primary"
+            size="mini"
+            icon="el-icon-download"
+            @click="handleDownloadReport"
+          >下载实验报告</el-button>
+        </el-descriptions-item>
       </el-descriptions>
       <div slot="footer" class="dialog-footer">
         <el-button @click="viewOpen = false">关 闭</el-button>
@@ -145,7 +153,7 @@
 </template>
 
 <script>
-import { listTask, getTask, delTask, addTask, updateTask } from "@/api/task/task"
+import { listTask, getTask, delTask, addTask, updateTask, downloadReport } from "@/api/task/task"
 import { listDeptForTask } from "@/api/system/dept"
 import { handleTree } from "@/utils/ruoyi"
 import Treeselect from "@riophae/vue-treeselect"
@@ -302,6 +310,14 @@ export default {
         this.viewForm = response.data
         this.viewOpen = true
       })
+    },
+    /** 下载实验报告 */
+    handleDownloadReport() {
+      if (!this.viewForm.reportFileUrl) {
+        this.$modal.msgWarning("该任务没有实验报告")
+        return
+      }
+      downloadReport(this.viewForm.reportFileUrl)
     },
     /** 成绩统计按钮操作 */
     handleStatistics(row) {

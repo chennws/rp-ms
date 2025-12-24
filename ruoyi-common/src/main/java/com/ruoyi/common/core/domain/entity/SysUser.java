@@ -31,7 +31,7 @@ public class SysUser extends BaseEntity
     private Long deptId;
 
     /** 用户账号 */
-    @Excel(name = "登录名称")
+    @Excel(name = "登录名称", prompt = "学号")
     private String userName;
 
     /** 用户昵称 */
@@ -92,6 +92,10 @@ public class SysUser extends BaseEntity
 
     /** 角色ID */
     private Long roleId;
+
+    /** 角色名称（用于Excel导入） */
+    @Excel(name = "角色", type = Type.IMPORT, sort = 7)
+    private String roleName;
 
     public SysUser()
     {
@@ -310,6 +314,16 @@ public class SysUser extends BaseEntity
     public void setRoleId(Long roleId)
     {
         this.roleId = roleId;
+    }
+
+    public String getRoleName()
+    {
+        return roleName;
+    }
+
+    public void setRoleName(String roleName)
+    {
+        this.roleName = roleName;
     }
 
     @Override

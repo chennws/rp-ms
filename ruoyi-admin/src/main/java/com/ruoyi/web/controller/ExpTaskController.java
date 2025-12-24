@@ -119,6 +119,57 @@ public class ExpTaskController extends BaseController
     }
 
     /**
+     * 下载实验报告
+     */
+    @PreAuthorize("@ss.hasPermi('task:task:list')")
+    @GetMapping("/download")
+    public void downloadReport(@RequestParam("url") String url, HttpServletResponse response)
+    {
+        try
+        {
+            if (com.ruoyi.common.utils.StringUtils.isBlank(url))
+            {
+                logger.error("下载文件URL为空");
+                return;
+            }
+            // 从完整URL中提取objectName
+            // URL格式可能是: http://endpoint/bucketName/objectName 或直接是 objectName
+            String objectName = url;
+            if (url.contains("http://") || url.contains("https://"))
+            {
+                // 如果是完整URL，提取objectName部分
+                // 查找最后一个斜杠后的内容，或者查找bucketName后的内容
+                String bucketName = minioConfig.getBucketName();
+                if (url.contains("/" + bucketName + "/"))
+                {
+                    // 提取bucketName之后的部分作为objectName
+                    int index = url.indexOf("/" + bucketName + "/");
+                    objectName = url.substring(index + bucketName.length() + 2);
+                }
+                else if (url.contains(bucketName + "/"))
+                {
+                    // 处理没有前导斜杠的情况
+                    objectName = url.substring(url.indexOf(bucketName + "/") + bucketName.length() + 1);
+                }
+                else
+                {
+                    // 如果找不到bucketName，尝试提取最后一个斜杠后的内容
+                    int lastSlash = url.lastIndexOf("/");
+                    if (lastSlash > 0)
+                    {
+                        objectName = url.substring(lastSlash + 1);
+                    }
+                }
+            }
+            minioUtil.download(objectName, response);
+        }
+        catch (Exception e)
+        {
+            logger.error("下载文件失败", e);
+        }
+    }
+
+    /**
      * 获取实验任务详细信息
      */
     @PreAuthorize("@ss.hasPermi('task:task:query')")

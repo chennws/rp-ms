@@ -511,6 +511,20 @@ public class SysUserServiceImpl implements ISysUserService
         {
             try
             {
+                // 处理角色名称，转换为角色ID
+                if (StringUtils.isNotEmpty(user.getRoleName()))
+                {
+                    SysRole role = roleMapper.checkRoleNameUnique(user.getRoleName());
+                    if (StringUtils.isNotNull(role))
+                    {
+                        user.setRoleIds(new Long[] { role.getRoleId() });
+                    }
+                    else
+                    {
+                        throw new ServiceException("角色名称【" + user.getRoleName() + "】不存在");
+                    }
+                }
+                
                 // 验证是否存在这个用户
                 SysUser u = userMapper.selectUserByUserName(user.getUserName());
                 if (StringUtils.isNull(u))
@@ -520,7 +534,8 @@ public class SysUserServiceImpl implements ISysUserService
                     String password = configService.selectConfigByKey("sys.user.initPassword");
                     user.setPassword(SecurityUtils.encryptPassword(password));
                     user.setCreateBy(operName);
-                    userMapper.insertUser(user);
+                    // 使用服务方法插入，会自动处理角色分配
+                    insertUser(user);
                     successNum++;
                     successMsg.append("<br/>" + successNum + "、账号 " + user.getUserName() + " 导入成功");
                 }
@@ -529,11 +544,19 @@ public class SysUserServiceImpl implements ISysUserService
                     BeanValidators.validateWithException(validator, user);
                     checkUserAllowed(u);
                     checkUserDataScope(u.getUserId());
-                    deptService.checkDeptDataScope(user.getDeptId());
+                    // 如果Excel中没有提供部门ID，则保留原来的部门ID
+                    if (StringUtils.isNull(user.getDeptId()))
+                    {
+                        user.setDeptId(u.getDeptId());
+                    }
+                    else
+                    {
+                        deptService.checkDeptDataScope(user.getDeptId());
+                    }
                     user.setUserId(u.getUserId());
-                    user.setDeptId(u.getDeptId());
                     user.setUpdateBy(operName);
-                    userMapper.updateUser(user);
+                    // 使用服务方法更新，会自动处理角色分配
+                    updateUser(user);
                     successNum++;
                     successMsg.append("<br/>" + successNum + "、账号 " + user.getUserName() + " 更新成功");
                 }
