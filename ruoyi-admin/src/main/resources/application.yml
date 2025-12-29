@@ -141,3 +141,17 @@ minio:
   accessKey: dWdDP8Lh2zwm3zodL6vU
   secretKey: ABTJr41wWWUTczPVeyf089nWC8yfpAfJONVRIEim
   bucketName: winter
+
+docservice:
+  # 文档转换服务地址
+  url: http://47.115.163.152:9000/
+  ignoreSSLCertificate: true
+  lossyEdit: epub, fb2, html, odt, ott, rtf, txt, csv, ods, ots, odp, otp
+  security:
+    enable: false
+    key: DO2z9oopirgOJsMBkCacx2TflPTAmRRl
+    header:
+  # 回调地址，这个回调地址是当前项目部署后的接口地址
+  callback: http://localhost:8080/Task/callback
+  watermark:
+    enable: true

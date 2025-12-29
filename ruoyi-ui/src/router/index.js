@@ -32,7 +32,7 @@ import Layout from '@/layout'
 export const constantRoutes = [
   {
     path: '/redirect',
-    component: Layout,
+    component: Layout,  
     hidden: true,
     children: [
       {
@@ -85,6 +85,19 @@ export const constantRoutes = [
         component: () => import('@/views/system/user/profile/index'),
         name: 'Profile',
         meta: { title: '个人中心', icon: 'user' }
+      }
+    ]
+  },
+  {
+    path: '/task/edit',
+    component: Layout,
+    hidden: true,
+    children: [
+      {
+        path: '',
+        component: () => import('@/views/task/edit'),
+        name: 'TaskEdit',
+        meta: { title: '在线完成任务', activeMenu: '/task' }
       }
     ]
   }

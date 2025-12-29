@@ -53,6 +53,13 @@
             @click="handleView(scope.row)"
           >查看详情</el-button>
           <el-button
+            v-if="scope.row.status === '1'"
+            size="mini"
+            type="text"
+            icon="el-icon-edit-outline"
+            @click="handleOnlineComplete(scope.row)"
+          >在线完成</el-button>
+          <el-button
             v-if="scope.row.status !== '2'"
             size="mini"
             type="text"
@@ -322,6 +329,28 @@ export default {
     /** 成绩统计按钮操作 */
     handleStatistics(row) {
       this.$router.push({ path: '/task/statistics', query: { taskId: row.taskId } })
+    },
+    /** 在线完成按钮操作 */
+    handleOnlineComplete(row) {
+      // 获取任务详情以获取文件URL
+      getTask(row.taskId).then(response => {
+        const task = response.data
+        if (!task.reportFileUrl) {
+          this.$modal.msgWarning("该任务没有实验报告模板，无法在线完成")
+          return
+        }
+        // 跳转到在线编辑页面
+        this.$router.push({
+          path: '/task/edit',
+          query: {
+            taskId: task.taskId,
+            taskName: task.taskName,
+            fileUrl: task.reportFileUrl
+          }
+        })
+      }).catch(() => {
+        this.$modal.msgError("获取任务信息失败")
+      })
     },
     /** 提交按钮 */
     submitForm() {

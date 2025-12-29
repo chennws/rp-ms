@@ -1,10 +1,44 @@
 package com.ruoyi.web.controller;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.UnsupportedEncodingException;
+import java.security.InvalidKeyException;
+import java.security.NoSuchAlgorithmException;
+import java.time.LocalDateTime;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+import java.util.regex.Pattern;
 
+import javax.annotation.Resource;
+import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
+
+import com.alibaba.fastjson.JSON;
+import com.onlyoffice.manager.security.JwtManager;
+import com.onlyoffice.model.documenteditor.Callback;
+import com.onlyoffice.model.documenteditor.Config;
+import com.onlyoffice.model.documenteditor.config.document.Type;
+
+
+import com.onlyoffice.model.documenteditor.config.editorconfig.Mode;
+import com.onlyoffice.service.documenteditor.callback.CallbackService;
+import com.ruoyi.system.service.ConfigService;
+import com.ruoyi.system.service.impl.OfficeServiceImpl;
+import com.ruoyi.web.controller.pojo.OfficeResponse;
+import com.ruoyi.web.controller.pojo.Response;
+import com.ruoyi.web.controller.pojo.SaveRequestParams;
+import io.minio.MinioClient;
+import io.minio.PutObjectArgs;
+import io.minio.errors.MinioException;
+import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -15,8 +49,10 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.client.RestTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
+import com.ruoyi.common.annotation.Anonymous;
 import com.ruoyi.common.annotation.Log;
 import com.ruoyi.common.core.controller.BaseController;
 import com.ruoyi.common.core.domain.AjaxResult;
@@ -36,10 +72,17 @@ import com.ruoyi.web.utils.MinioUtil;
  * @author ruoyi
  * @date 2024-03-01
  */
+@Slf4j
 @RestController
 @RequestMapping("/Task")
 public class ExpTaskController extends BaseController
 {
+    @Resource
+    private MinioClient minioClient;
+
+    @Resource
+    private OfficeServiceImpl officeService;
+
     @Autowired
     private IExpTaskService expTaskService;
 
@@ -49,6 +92,22 @@ public class ExpTaskController extends BaseController
     @Autowired
     private MinioConfig minioConfig;
 
+    @Resource
+    private ConfigService configService;
+
+    @Resource
+    private CallbackService callbackService;
+
+    @Resource
+    private JwtManager jwtManager;
+
+    @Value("${docservice.url}")
+    private String officeRequestUrl;
+
+    @Value("${minio.endpoint}")
+    private String endpoint;
+    @Value("${minio.bucket-name}")
+    private String bucketName;
     /**
      * 查询实验任务列表
      */
@@ -245,6 +304,127 @@ public class ExpTaskController extends BaseController
         {
             logger.error("文件上传失败", e);
             return error("文件上传失败：" + e.getMessage());
+        }
+    }
+
+    /**
+     * 获取OnlyOffice编辑器配置（允许匿名访问）
+     */
+    @Anonymous
+    @GetMapping("/config")
+    public Response<Config> getConfig(@RequestParam String fileUrl, @RequestParam Mode mode) throws UnsupportedEncodingException {
+        Config config = this.configService.createConfig(fileUrl, mode, Type.DESKTOP);
+        return Response.success(config);
+    }
+
+    /**
+     * onlyfoofice回调接口，开始编辑、保存文件的时候会触发（允许匿名访问）
+     * @param request
+     * @param fileUrl
+     * @param body
+     * @return
+     */
+    @Anonymous
+    @PostMapping("/callback")
+    public String callback(final HttpServletRequest request,  // track file changes
+                           @RequestParam("fileUrl") final String fileUrl,
+                           @RequestBody final Callback body) {
+        log.debug("onlyoffice回调参数{}", JSON.toJSONString(body));
+        try {
+//            String authorization = request.getHeader("Authorization");
+//            if (StringUtils.isEmpty(authorization)) {
+//                return "{\"error\":1,\"message\":\"Request payload is empty\"}";
+//            }
+//            String token = authorization.replace("Bearer ", "");
+//            Callback callback = this.callbackService.verifyCallback(body, token);
+//            this.callbackService.processCallback(callback, fileUrl);
+
+            this.callbackService.processCallback(body, fileUrl);
+        } catch (Exception e) {
+            log.error("", e);
+            return "{\"error\":1,\"message\":\"Request payload is empty\"}";
+        }
+        return "{\"error\":\"0\"}";
+    }
+
+
+    /**
+     * 触发onlyoffice服务保存文档
+     *
+     * @param key 文件key
+     * @return
+     */
+    @PostMapping("/save")
+    public Response<?> saveFile(@RequestParam("key") String key) {
+        SaveRequestParams params = new SaveRequestParams();
+        params.setKey(key);
+        String token = this.jwtManager.createToken(params);
+        Map<String, String> data = new HashMap<>();
+        data.put("token", token);
+        RestTemplate restTemplate = new RestTemplate();
+        String requestUrl = this.officeRequestUrl + "coauthoring/CommandService.ashx";
+        ResponseEntity<OfficeResponse> response = restTemplate.postForEntity(requestUrl, data, OfficeResponse.class);
+        OfficeResponse result = response.getBody();
+        log.debug("发送保存请求，响应结果{}", result);
+        if (result == null) {
+            log.error("消息发送失败，未接收到响应体");
+            return Response.failed("消息发送失败，未接收到响应体");
+        }
+        Integer error = result.getError();
+        if (error == 0 || error == 4) {
+            // error = 4，文档没有做任何修改
+            // 请求成功
+            return Response.success("保存成功");
+        } else {
+            return Response.failed("保存失败");
+        }
+    }
+
+    @GetMapping("/pdf/export")
+    public void exportPdf(@RequestParam String fileUrl, HttpServletResponse response) throws IOException, MinioException, NoSuchAlgorithmException, InvalidKeyException {
+        this.officeService.coverToPdf(fileUrl, response);
+    }
+
+    /**
+     * 上传新文件（OnlyOffice使用）
+     */
+    @PostMapping("/upload/new")
+    public Response<String> uploadNewFile(@RequestParam("file") MultipartFile file) {
+        // 上传文件到 MinIO
+        try (InputStream inputStream = file.getInputStream()) {
+            String fileName = file.getOriginalFilename();
+            if (StringUtils.isEmpty(fileName)) {
+                return Response.failed("文件名不能为空");
+            }
+            String suffix = fileName.substring(fileName.lastIndexOf("."));
+            if (StringUtils.isEmpty(suffix)) {
+                return Response.failed("文件后缀不能为空");
+            }
+            LocalDateTime date = LocalDateTime.now();
+            int year = date.getYear();
+            int month = date.getMonthValue() + 1;
+            int day = date.getDayOfMonth();
+            String newName = UUID.randomUUID() + suffix;
+            String objectName = String.format("/%s/%s/%s/%s", year, month, day, newName);
+            String contentType;
+            // 将文档设置成下载类型
+            if (Pattern.matches(".*\\.(docx|xlsx|pdf|pptx)$", fileName)) {
+                contentType = "application/octet-stream";
+            } else {
+                contentType = file.getContentType();
+            }
+            PutObjectArgs args = PutObjectArgs.builder()
+                    .bucket(this.bucketName)
+                    .object(objectName)
+                    .stream(inputStream, file.getSize(), -1)
+                    .contentType(contentType)
+                    .build();
+            this.minioClient.putObject(args);
+            String url = String.format("%s/%s%s", this.endpoint, this.bucketName, objectName);
+            return Response.success(url);
+        } catch (Exception e) {
+            log.error("", e);
+            return Response.failed();
         }
     }
 }

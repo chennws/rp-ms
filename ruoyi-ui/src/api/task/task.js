@@ -77,4 +77,40 @@ export function downloadReport(url) {
   })
 }
 
+// 获取文档编辑器配置
+// 接口地址: GET /Task/config
+// 参数:
+//   - fileUrl: 文件URL (例如: http://47.115.163.152:10001/winter/xxx.docx)
+//   - mode: 编辑模式 (EDIT 或 VIEW，不区分大小写)
+export function getConfig(fileUrl, mode) {
+  // 确保 mode 参数格式正确（转换为大写，与API工具保持一致）
+  const modeValue = (mode || 'EDIT').toUpperCase()
+
+  console.log('调用 /Task/config 接口')
+  console.log('参数:', {
+    fileUrl: fileUrl,
+    mode: modeValue
+  })
+
+  return request({
+    url: '/Task/config',
+    method: 'get',
+    params: { 
+      fileUrl: fileUrl,
+      mode: modeValue  // EDIT 或 VIEW
+    }
+  })
+}
+
+// 提交任务
+export function submitTask(taskId, fileUrl) {
+  return request({
+    url: '/Task/submit',
+    method: 'post',
+    data: {
+      taskId: taskId,
+      fileUrl: fileUrl
+    }
+  })
+}
 
