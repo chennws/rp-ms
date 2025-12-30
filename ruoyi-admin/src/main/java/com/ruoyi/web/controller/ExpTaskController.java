@@ -6,6 +6,7 @@ import java.io.UnsupportedEncodingException;
 import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -62,6 +63,7 @@ import com.ruoyi.common.enums.BusinessType;
 import com.ruoyi.common.utils.SecurityUtils;
 import com.ruoyi.common.utils.poi.ExcelUtil;
 import com.ruoyi.system.domain.ExpTask;
+import com.ruoyi.system.domain.ExpTaskSubmit;
 import com.ruoyi.system.service.IExpTaskService;
 import com.ruoyi.system.service.IExpTaskSubmitService;
 import com.ruoyi.web.core.config.MinioConfig;
@@ -404,10 +406,105 @@ public class ExpTaskController extends BaseController
     }
 
     /**
+     * 学生打开任务时创建报告副本
+     * 从模板文件复制一份，每个学生有独立的文件
+     */
+    @PreAuthorize("@ss.hasPermi('task:task:query')")
+    @PostMapping("/createCopy")
+    public AjaxResult createCopy(@RequestBody Map<String, Object> params)
+    {
+        try
+        {
+            Long taskId = Long.valueOf(params.get("taskId").toString());
+
+            // 获取当前登录用户信息
+            LoginUser loginUser = getLoginUser();
+            Long userId = loginUser.getUserId();
+
+            // 检查是否已经创建过副本
+            ExpTaskSubmit existSubmit = expTaskSubmitService.selectExpTaskSubmitByTaskIdAndUserId(taskId, userId);
+            if (existSubmit != null && com.ruoyi.common.utils.StringUtils.isNotEmpty(existSubmit.getFileUrl()))
+            {
+                // 已经创建过副本，直接返回
+                logger.info("学生已有副本文件, taskId: {}, userId: {}, fileUrl: {}", taskId, userId, existSubmit.getFileUrl());
+                return success(existSubmit.getFileUrl());
+            }
+
+            // 获取任务信息
+            ExpTask task = expTaskService.selectExpTaskByTaskId(taskId);
+            if (task == null)
+            {
+                return error("任务不存在");
+            }
+
+            String templateUrl = task.getReportFileUrl();
+            if (com.ruoyi.common.utils.StringUtils.isEmpty(templateUrl))
+            {
+                return error("任务模板文件不存在");
+            }
+
+            logger.info("开始创建副本, templateUrl: {}", templateUrl);
+
+            // 从模板URL中提取文件名和扩展名
+            String templateObjectName = templateUrl.replace(minioConfig.getEndpoint() + "/" + minioConfig.getBucketName() + "/", "");
+            String extension = templateObjectName.substring(templateObjectName.lastIndexOf("."));
+
+            // 生成副本文件名：taskId_userId_timestamp.扩展名
+            long timestamp = System.currentTimeMillis();
+            String copyFileName = String.format("%d_%d_%d%s", taskId, userId, timestamp, extension);
+
+            // 生成副本对象名（按日期分文件夹）
+            LocalDateTime now = LocalDateTime.now();
+            String copyObjectName = String.format("/%d/%d/%d/submit_%s",
+                now.getYear(), now.getMonthValue(), now.getDayOfMonth(), copyFileName);
+
+            // 从MinIO下载模板文件
+            InputStream templateStream = minioClient.getObject(
+                io.minio.GetObjectArgs.builder()
+                    .bucket(minioConfig.getBucketName())
+                    .object(templateObjectName)
+                    .build()
+            );
+
+            // 上传副本到MinIO
+            PutObjectArgs putArgs = PutObjectArgs.builder()
+                .bucket(minioConfig.getBucketName())
+                .object(copyObjectName)
+                .stream(templateStream, -1, 10485760) // 最小分片大小10MB
+                .contentType("application/octet-stream")
+                .build();
+
+            minioClient.putObject(putArgs);
+            templateStream.close();
+
+            // 生成副本URL
+            String copyUrl = minioConfig.getEndpoint() + "/" + minioConfig.getBucketName() + copyObjectName;
+
+            logger.info("副本创建成功, copyUrl: {}", copyUrl);
+
+            // 创建提交记录（初始状态，file_url为副本URL）
+            ExpTaskSubmit submit = new ExpTaskSubmit();
+            submit.setTaskId(taskId);
+            submit.setUserId(userId);
+            submit.setUserName(loginUser.getUsername());
+            submit.setFileUrl(copyUrl);
+            submit.setStatus("0"); // 待批阅
+            expTaskSubmitService.insertExpTaskSubmit(submit);
+
+            return success(copyUrl);
+        }
+        catch (Exception e)
+        {
+            logger.error("创建副本失败", e);
+            return error("创建副本失败：" + e.getMessage());
+        }
+    }
+
+    /**
      * 学生提交任务
      * 提交流程：
      * 1. 先触发OnlyOffice保存文档到MinIO
-     * 2. 保存成功后记录学生提交信息到数据库
+     * 2. 保存成功后更新提交记录的提交时间
      */
     @PreAuthorize("@ss.hasPermi('task:task:query')")
     @Log(title = "提交任务", businessType = BusinessType.UPDATE)
@@ -419,29 +516,23 @@ public class ExpTaskController extends BaseController
             // 获取参数
             Long taskId = Long.valueOf(params.get("taskId").toString());
             String documentKey = params.get("documentKey") != null ? params.get("documentKey").toString() : null;
+            String fileUrl = params.get("fileUrl") != null ? params.get("fileUrl").toString() : null;
 
             if (documentKey == null || documentKey.isEmpty())
             {
                 return error("文档标识不能为空");
             }
 
+            if (fileUrl == null || fileUrl.isEmpty())
+            {
+                return error("文件URL不能为空");
+            }
+
             // 获取当前登录用户信息
             LoginUser loginUser = getLoginUser();
             Long userId = loginUser.getUserId();
-            String userName = loginUser.getUsername();
 
-            // 获取任务信息
-            ExpTask task = expTaskService.selectExpTaskByTaskId(taskId);
-            if (task == null)
-            {
-                return error("任务不存在");
-            }
-
-            String fileUrl = task.getReportFileUrl();
-            if (fileUrl == null || fileUrl.isEmpty())
-            {
-                return error("任务文件URL不能为空");
-            }
+            logger.info("学生提交任务, taskId: {}, userId: {}, fileUrl: {}", taskId, userId, fileUrl);
 
             // 1. 先触发OnlyOffice保存文档
             logger.info("开始触发OnlyOffice保存文档, documentKey: {}", documentKey);
@@ -482,18 +573,25 @@ public class ExpTaskController extends BaseController
                 return error("保存文档失败，错误码：" + errorCode);
             }
 
-            // 2. 文档保存成功后，记录学生提交信息
-            logger.info("文档保存成功，开始记录提交信息");
-            int submitResult = expTaskSubmitService.submitTask(taskId, fileUrl, userId, userName);
+            // 2. 文档保存成功后，更新提交时间
+            logger.info("文档保存成功，更新提交时间");
+            ExpTaskSubmit submit = expTaskSubmitService.selectExpTaskSubmitByTaskIdAndUserId(taskId, userId);
+            if (submit == null)
+            {
+                return error("未找到提交记录，请先打开编辑器");
+            }
 
-            if (submitResult > 0)
+            submit.setSubmitTime(new Date());
+            int updateResult = expTaskSubmitService.updateExpTaskSubmit(submit);
+
+            if (updateResult > 0)
             {
                 logger.info("任务提交成功, taskId: {}, userId: {}", taskId, userId);
                 return success("提交成功");
             }
             else
             {
-                logger.error("记录提交信息失败");
+                logger.error("更新提交时间失败");
                 return error("提交失败");
             }
         }

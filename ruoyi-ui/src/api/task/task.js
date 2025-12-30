@@ -107,13 +107,27 @@ export function getConfig(fileUrl, mode) {
 // 参数:
 //   - taskId: 任务ID
 //   - documentKey: OnlyOffice文档key（用于触发保存）
-export function submitTask(taskId, documentKey) {
+//   - fileUrl: 副本文件URL
+export function submitTask(taskId, documentKey, fileUrl) {
   return request({
     url: '/Task/submit',
     method: 'post',
     data: {
       taskId: taskId,
-      documentKey: documentKey
+      documentKey: documentKey,
+      fileUrl: fileUrl
+    }
+  })
+}
+
+// 创建副本
+// 学生打开编辑器前，从模板文件创建一个副本
+export function createCopy(taskId) {
+  return request({
+    url: '/Task/createCopy',
+    method: 'post',
+    data: {
+      taskId: taskId
     }
   })
 }
