@@ -7,6 +7,8 @@ import com.onlyoffice.model.documenteditor.Callback;
 import com.onlyoffice.model.documenteditor.callback.Action;
 import com.onlyoffice.model.documenteditor.callback.action.Type;
 import com.onlyoffice.service.documenteditor.callback.CallbackService;
+import com.ruoyi.system.domain.ExpTaskSubmit;
+import com.ruoyi.system.service.IExpTaskSubmitService;
 import io.minio.MinioClient;
 import io.minio.PutObjectArgs;
 import lombok.extern.slf4j.Slf4j;
@@ -23,6 +25,9 @@ import org.springframework.web.client.RestTemplate;
 import javax.annotation.Resource;
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
+import java.util.Date;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Author: Li
@@ -45,6 +50,8 @@ public class CallbackServiceImpl implements CallbackService {
     private String endpoint;
     @Resource
     private MinioClient minioClient;
+    @Resource
+    private IExpTaskSubmitService expTaskSubmitService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     /**
@@ -164,7 +171,44 @@ public class CallbackServiceImpl implements CallbackService {
 
     @Override
     public void handlerForcesave(final Callback callback, final String fileUrl)  {
+        // 先保存文件
         this.handlerSave(callback, fileUrl);
+
+        // 保存成功后，检查是否有等待提交的记录
+        try {
+            // 从fileUrl中解析taskId和userId
+            // 文件URL格式: http://endpoint/bucketName/year/month/day/submit_taskId_userId_timestamp.extension
+            String objectName = fileUrl.replace(this.endpoint + "/" + this.bucketName + "/", "");
+
+            // 使用正则表达式提取taskId和userId
+            // 匹配模式：submit_数字_数字_数字.扩展名
+            Pattern pattern = Pattern.compile("submit_(\\d+)_(\\d+)_\\d+\\.\\w+");
+            Matcher matcher = pattern.matcher(objectName);
+
+            if (matcher.find()) {
+                Long taskId = Long.parseLong(matcher.group(1));
+                Long userId = Long.parseLong(matcher.group(2));
+
+                log.info("从文件名解析出 taskId: {}, userId: {}", taskId, userId);
+
+                // 查询提交记录
+                ExpTaskSubmit submit = expTaskSubmitService.selectExpTaskSubmitByTaskIdAndUserId(taskId, userId);
+                if (submit != null && submit.getSubmitPending() != null && submit.getSubmitPending() == 1) {
+                    // 如果正在提交中，更新提交时间并清除提交中标记
+                    submit.setSubmitTime(new Date());
+                    submit.setSubmitPending(0);
+                    expTaskSubmitService.updateExpTaskSubmit(submit);
+                    log.info("任务提交成功，已更新submit_time, taskId: {}, userId: {}", taskId, userId);
+                } else {
+                    log.debug("未找到提交中的记录或已提交，taskId: {}, userId: {}", taskId, userId);
+                }
+            } else {
+                log.debug("文件名不符合提交副本格式，跳过提交状态更新: {}", objectName);
+            }
+        } catch (Exception e) {
+            log.error("更新提交状态失败", e);
+            // 不抛出异常，避免影响文件保存
+        }
     }
 
 

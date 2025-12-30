@@ -82,23 +82,28 @@ export function downloadReport(url) {
 // 参数:
 //   - fileUrl: 文件URL (例如: http://47.115.163.152:10001/winter/xxx.docx)
 //   - mode: 编辑模式 (EDIT 或 VIEW，不区分大小写)
-export function getConfig(fileUrl, mode) {
+//   - documentKey: 自定义文档key（可选，用于保持文档版本一致性）
+export function getConfig(fileUrl, mode, documentKey) {
   // 确保 mode 参数格式正确（转换为大写，与API工具保持一致）
   const modeValue = (mode || 'EDIT').toUpperCase()
 
-  console.log('调用 /Task/config 接口')
-  console.log('参数:', {
+  const params = {
     fileUrl: fileUrl,
-    mode: modeValue
-  })
+    mode: modeValue  // EDIT 或 VIEW
+  }
+
+  // 如果传入了documentKey则添加到参数中
+  if (documentKey) {
+    params.documentKey = documentKey
+  }
+
+  console.log('调用 /Task/config 接口')
+  console.log('参数:', params)
 
   return request({
     url: '/Task/config',
     method: 'get',
-    params: { 
-      fileUrl: fileUrl,
-      mode: modeValue  // EDIT 或 VIEW
-    }
+    params: params
   })
 }
 
@@ -132,3 +137,14 @@ export function createCopy(taskId) {
   })
 }
 
+// 检查任务提交状态
+// 用于轮询检查callback是否已成功保存文件到MinIO
+export function checkSubmitStatus(taskId) {
+  return request({
+    url: '/Task/checkSubmitStatus',
+    method: 'get',
+    params: {
+      taskId: taskId
+    }
+  })
+}

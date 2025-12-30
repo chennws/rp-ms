@@ -59,10 +59,15 @@ public class ConfigServiceImpl implements ConfigService {
     private String endpoint;
 
     public Config createConfig(final String fileUrl, final Mode mode, final Type pageType) throws UnsupportedEncodingException {
+        return createConfig(fileUrl, mode, pageType, null);
+    }
+
+    @Override
+    public Config createConfig(final String fileUrl, final Mode mode, final Type pageType, final String documentKey) throws UnsupportedEncodingException {
         // @TODO fileUrl可以是fileId, 在这里可以根据fileId查询数据库中具体的文件信息进行填充
         DocumentType documentType = this.getDocumentType(fileUrl);
         // 文档配置
-        Document document = this.getDocument(fileUrl, pageType);
+        Document document = this.getDocument(fileUrl, pageType, documentKey);
         // 编辑器配置
         EditorConfig editorConfig = this.getEditorConfig(fileUrl, mode, pageType);
         Config config = Config.builder()
@@ -109,6 +114,13 @@ public class ConfigServiceImpl implements ConfigService {
      * 获取文档相关的配置
      */
     public Document getDocument(String fileUrl, Type type)  {
+        return getDocument(fileUrl, type, null);
+    }
+
+    /**
+     * 获取文档相关的配置（支持自定义documentKey）
+     */
+    public Document getDocument(String fileUrl, Type type, String customDocumentKey)  {
         // 文档标题
         String documentName = this.getDocumentName(fileUrl);
         /*
@@ -118,28 +130,36 @@ public class ConfigServiceImpl implements ConfigService {
          * 否则，服务可能会从编辑器缓存中打开其他人的文件。如果多个第三方集成商连接到同一文档服务器，他们也必须提供唯一的密钥。
          * 可以使用的关键字符： 0-9, a-z, A-Z, -._=。 最大密钥长度为 128 个字符。 :::
          *
-         * ！！！！这里获取minio中的文件名+最后修改时间生成hash随机字符串作为key，这样key值和文件版本对应有效利用文档转换服务中的缓存策略
+         * ！！！！如果传入了customDocumentKey则直接使用，否则从minio获取文件信息生成key
          * key的生成策略非常重要！！！，如果每次都生成新的key会造成文件的缓存失效，文档转换服务将重新下载文件，可能导致文件不一致
          */
         String key;
-        try {
-            String objectName = extractObjectName(fileUrl);
-            if (StringUtils.isEmpty(objectName)) {
-                throw new RuntimeException("无法从URL中提取objectName: " + fileUrl);
+        if (StringUtils.isNotEmpty(customDocumentKey)) {
+            // 使用传入的自定义key
+            key = customDocumentKey;
+            log.info("使用自定义documentKey: {}", key);
+        } else {
+            // 使用minio文件信息生成key（原有逻辑）
+            try {
+                String objectName = extractObjectName(fileUrl);
+                if (StringUtils.isEmpty(objectName)) {
+                    throw new RuntimeException("无法从URL中提取objectName: " + fileUrl);
+                }
+                StatObjectResponse stat = this.minioClient.statObject(StatObjectArgs.builder()
+                        .bucket(this.bucketName)
+                        .object(objectName)
+                        .build());
+                ZonedDateTime zonedDateTime = stat.lastModified();
+                // 将 ZonedDateTime 转换为 Instant
+                Instant instant = zonedDateTime.toInstant();
+                // 获取时间戳（毫秒）
+                long timestamp = instant.toEpochMilli();
+                key = DigestUtils.sha256Hex(objectName + timestamp);
+                log.debug("自动生成documentKey: {}", key);
+            }catch (Exception e) {
+                key = UUID.randomUUID().toString();
+                log.error("获取文件信息失败: {}", e.getMessage(), e);
             }
-            StatObjectResponse stat = this.minioClient.statObject(StatObjectArgs.builder()
-                    .bucket(this.bucketName)
-                    .object(objectName)
-                    .build());
-            ZonedDateTime zonedDateTime = stat.lastModified();
-            // 将 ZonedDateTime 转换为 Instant
-            Instant instant = zonedDateTime.toInstant();
-            // 获取时间戳（毫秒）
-            long timestamp = instant.toEpochMilli();
-            key = DigestUtils.sha256Hex(objectName + timestamp);
-        }catch (Exception e) {
-            key = UUID.randomUUID().toString();
-            log.error("获取文件信息失败: {}", e.getMessage(), e);
         }
         String suffix = this.getExtension(fileUrl);
         return Document.builder()

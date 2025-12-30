@@ -37,6 +37,7 @@ import io.minio.PutObjectArgs;
 import io.minio.errors.MinioException;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.commons.codec.digest.DigestUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
@@ -321,8 +322,10 @@ public class ExpTaskController extends BaseController
      */
     @Anonymous
     @GetMapping("/config")
-    public Response<Config> getConfig(@RequestParam String fileUrl, @RequestParam Mode mode) throws UnsupportedEncodingException {
-        Config config = this.configService.createConfig(fileUrl, mode, Type.DESKTOP);
+    public Response<Config> getConfig(@RequestParam String fileUrl,
+                                       @RequestParam Mode mode,
+                                       @RequestParam(required = false) String documentKey) throws UnsupportedEncodingException {
+        Config config = this.configService.createConfig(fileUrl, mode, Type.DESKTOP, documentKey);
         return Response.success(config);
     }
 
@@ -425,9 +428,12 @@ public class ExpTaskController extends BaseController
             ExpTaskSubmit existSubmit = expTaskSubmitService.selectExpTaskSubmitByTaskIdAndUserId(taskId, userId);
             if (existSubmit != null && com.ruoyi.common.utils.StringUtils.isNotEmpty(existSubmit.getFileUrl()))
             {
-                // 已经创建过副本，直接返回
-                logger.info("学生已有副本文件, taskId: {}, userId: {}, fileUrl: {}", taskId, userId, existSubmit.getFileUrl());
-                return success(existSubmit.getFileUrl());
+                // 已经创建过副本，返回文件URL和documentKey
+                logger.info("学生已有副本文件, taskId: {}, userId: {}, fileUrl: {}, documentKey: {}",
+                    taskId, userId, existSubmit.getFileUrl(), existSubmit.getDocumentKey());
+                AjaxResult result = success(existSubmit.getFileUrl());
+                result.put("documentKey", existSubmit.getDocumentKey());
+                return result;
             }
 
             // 获取任务信息
@@ -482,16 +488,23 @@ public class ExpTaskController extends BaseController
 
             logger.info("副本创建成功, copyUrl: {}", copyUrl);
 
+            // 生成稳定的documentKey (基于taskId和userId,不依赖文件修改时间)
+            String documentKey = DigestUtils.sha256Hex("task_" + taskId + "_user_" + userId);
+            logger.info("生成documentKey: {}", documentKey);
+
             // 创建提交记录（初始状态，file_url为副本URL）
             ExpTaskSubmit submit = new ExpTaskSubmit();
             submit.setTaskId(taskId);
             submit.setUserId(userId);
             submit.setUserName(loginUser.getUsername());
             submit.setFileUrl(copyUrl);
+            submit.setDocumentKey(documentKey);
             submit.setStatus("0"); // 待批阅
             expTaskSubmitService.insertExpTaskSubmit(submit);
 
-            return success(copyUrl);
+            AjaxResult result = success(copyUrl);
+            result.put("documentKey", documentKey);
+            return result;
         }
         catch (Exception e)
         {
@@ -573,25 +586,26 @@ public class ExpTaskController extends BaseController
                 return error("保存文档失败，错误码：" + errorCode);
             }
 
-            // 2. 文档保存成功后，更新提交时间
-            logger.info("文档保存成功，更新提交时间");
+            // 2. 文档保存命令发送成功后，设置"提交中"状态
+            logger.info("OnlyOffice保存命令发送成功，设置提交中状态");
             ExpTaskSubmit submit = expTaskSubmitService.selectExpTaskSubmitByTaskIdAndUserId(taskId, userId);
             if (submit == null)
             {
                 return error("未找到提交记录，请先打开编辑器");
             }
 
-            submit.setSubmitTime(new Date());
+            // 设置提交中标记，等待callback保存成功后更新submit_time
+            submit.setSubmitPending(1);
             int updateResult = expTaskSubmitService.updateExpTaskSubmit(submit);
 
             if (updateResult > 0)
             {
-                logger.info("任务提交成功, taskId: {}, userId: {}", taskId, userId);
-                return success("提交成功");
+                logger.info("已标记为提交中, taskId: {}, userId: {}", taskId, userId);
+                return success("正在保存，请稍候...");
             }
             else
             {
-                logger.error("更新提交时间失败");
+                logger.error("设置提交中状态失败");
                 return error("提交失败");
             }
         }
@@ -599,6 +613,58 @@ public class ExpTaskController extends BaseController
         {
             logger.error("提交任务失败", e);
             return error("提交失败：" + e.getMessage());
+        }
+    }
+
+    /**
+     * 检查任务提交状态
+     * 前端轮询此接口，检查callback是否已成功保存文件到MinIO
+     */
+    @PreAuthorize("@ss.hasPermi('task:task:query')")
+    @GetMapping("/checkSubmitStatus")
+    public AjaxResult checkSubmitStatus(@RequestParam Long taskId)
+    {
+        try
+        {
+            // 获取当前登录用户信息
+            LoginUser loginUser = getLoginUser();
+            Long userId = loginUser.getUserId();
+
+            ExpTaskSubmit submit = expTaskSubmitService.selectExpTaskSubmitByTaskIdAndUserId(taskId, userId);
+            if (submit == null)
+            {
+                return error("未找到提交记录");
+            }
+
+            AjaxResult result = success();
+            result.put("submitPending", submit.getSubmitPending());
+            result.put("submitTime", submit.getSubmitTime());
+
+            // submitPending=0 且 submitTime不为空，说明提交成功
+            if (submit.getSubmitPending() == 0 && submit.getSubmitTime() != null)
+            {
+                result.put("status", "success");
+                result.put("message", "提交成功");
+            }
+            // submitPending=1，说明正在提交中
+            else if (submit.getSubmitPending() == 1)
+            {
+                result.put("status", "pending");
+                result.put("message", "正在保存中...");
+            }
+            // 其他情况
+            else
+            {
+                result.put("status", "not_submitted");
+                result.put("message", "未提交");
+            }
+
+            return result;
+        }
+        catch (Exception e)
+        {
+            logger.error("检查提交状态失败", e);
+            return error("检查状态失败：" + e.getMessage());
         }
     }
 
