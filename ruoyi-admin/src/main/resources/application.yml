@@ -151,7 +151,10 @@ docservice:
     enable: false
     key: DO2z9oopirgOJsMBkCacx2TflPTAmRRl
     header:
-  # 回调地址，这个回调地址是当前项目部署后的接口地址
-  callback: http://localhost:8080/Task/callback
+  # 回调地址，OnlyOffice保存文件后会调用此地址
+  # 使用NATAPP内网穿透地址，替换为你实际启动NATAPP后显示的地址
+  # 重要：每次启动NATAPP后，需要检查地址是否变化（免费版地址会变）
+  # 示例：http://server.natappfree.cc/Task/callback
+  callback: http://md5f296a.natappfree.cc/Task/callback
   watermark:
     enable: true
