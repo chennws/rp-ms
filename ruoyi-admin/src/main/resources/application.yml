@@ -144,7 +144,7 @@ minio:
 
 docservice:
   # 文档转换服务地址
-  url: http://47.115.163.152:9000/
+  url: http://47.115.163.152:9001/
   ignoreSSLCertificate: true
   lossyEdit: epub, fb2, html, odt, ott, rtf, txt, csv, ods, ots, odp, otp
   security:

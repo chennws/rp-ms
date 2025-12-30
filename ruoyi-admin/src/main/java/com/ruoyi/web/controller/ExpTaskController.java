@@ -63,6 +63,7 @@ import com.ruoyi.common.utils.SecurityUtils;
 import com.ruoyi.common.utils.poi.ExcelUtil;
 import com.ruoyi.system.domain.ExpTask;
 import com.ruoyi.system.service.IExpTaskService;
+import com.ruoyi.system.service.IExpTaskSubmitService;
 import com.ruoyi.web.core.config.MinioConfig;
 import com.ruoyi.web.utils.MinioUtil;
 
@@ -87,6 +88,9 @@ public class ExpTaskController extends BaseController
     private IExpTaskService expTaskService;
 
     @Autowired
+    private IExpTaskSubmitService expTaskSubmitService;
+
+    @Autowired
     private MinioUtil minioUtil;
 
     @Autowired
@@ -103,6 +107,9 @@ public class ExpTaskController extends BaseController
 
     @Value("${docservice.url}")
     private String officeRequestUrl;
+
+    @Value("${docservice.security.enable}")
+    private Boolean securityEnable;
 
     @Value("${minio.endpoint}")
     private String endpoint;
@@ -358,12 +365,23 @@ public class ExpTaskController extends BaseController
     public Response<?> saveFile(@RequestParam("key") String key) {
         SaveRequestParams params = new SaveRequestParams();
         params.setKey(key);
-        String token = this.jwtManager.createToken(params);
-        Map<String, String> data = new HashMap<>();
-        data.put("token", token);
+
         RestTemplate restTemplate = new RestTemplate();
         String requestUrl = this.officeRequestUrl + "coauthoring/CommandService.ashx";
-        ResponseEntity<OfficeResponse> response = restTemplate.postForEntity(requestUrl, data, OfficeResponse.class);
+
+        // 根据配置决定发送格式
+        ResponseEntity<OfficeResponse> response;
+        if (Boolean.TRUE.equals(this.securityEnable)) {
+            // 安全模式启用：发送JWT token
+            String token = this.jwtManager.createToken(params);
+            Map<String, String> data = new HashMap<>();
+            data.put("token", token);
+            response = restTemplate.postForEntity(requestUrl, data, OfficeResponse.class);
+        } else {
+            // 安全模式禁用：直接发送命令参数
+            response = restTemplate.postForEntity(requestUrl, params, OfficeResponse.class);
+        }
+
         OfficeResponse result = response.getBody();
         log.debug("发送保存请求，响应结果{}", result);
         if (result == null) {
@@ -383,6 +401,107 @@ public class ExpTaskController extends BaseController
     @GetMapping("/pdf/export")
     public void exportPdf(@RequestParam String fileUrl, HttpServletResponse response) throws IOException, MinioException, NoSuchAlgorithmException, InvalidKeyException {
         this.officeService.coverToPdf(fileUrl, response);
+    }
+
+    /**
+     * 学生提交任务
+     * 提交流程：
+     * 1. 先触发OnlyOffice保存文档到MinIO
+     * 2. 保存成功后记录学生提交信息到数据库
+     */
+    @PreAuthorize("@ss.hasPermi('task:task:query')")
+    @Log(title = "提交任务", businessType = BusinessType.UPDATE)
+    @PostMapping("/submit")
+    public AjaxResult submitTask(@RequestBody Map<String, Object> params)
+    {
+        try
+        {
+            // 获取参数
+            Long taskId = Long.valueOf(params.get("taskId").toString());
+            String documentKey = params.get("documentKey") != null ? params.get("documentKey").toString() : null;
+
+            if (documentKey == null || documentKey.isEmpty())
+            {
+                return error("文档标识不能为空");
+            }
+
+            // 获取当前登录用户信息
+            LoginUser loginUser = getLoginUser();
+            Long userId = loginUser.getUserId();
+            String userName = loginUser.getUsername();
+
+            // 获取任务信息
+            ExpTask task = expTaskService.selectExpTaskByTaskId(taskId);
+            if (task == null)
+            {
+                return error("任务不存在");
+            }
+
+            String fileUrl = task.getReportFileUrl();
+            if (fileUrl == null || fileUrl.isEmpty())
+            {
+                return error("任务文件URL不能为空");
+            }
+
+            // 1. 先触发OnlyOffice保存文档
+            logger.info("开始触发OnlyOffice保存文档, documentKey: {}", documentKey);
+            SaveRequestParams saveParams = new SaveRequestParams();
+            saveParams.setKey(documentKey);
+
+            RestTemplate restTemplate = new RestTemplate();
+            String requestUrl = this.officeRequestUrl + "coauthoring/CommandService.ashx";
+
+            // 根据配置决定发送格式
+            ResponseEntity<OfficeResponse> response;
+            if (Boolean.TRUE.equals(this.securityEnable)) {
+                // 安全模式启用：发送JWT token
+                String token = this.jwtManager.createToken(saveParams);
+                Map<String, String> requestData = new HashMap<>();
+                requestData.put("token", token);
+                response = restTemplate.postForEntity(requestUrl, requestData, OfficeResponse.class);
+            } else {
+                // 安全模式禁用：直接发送命令参数
+                response = restTemplate.postForEntity(requestUrl, saveParams, OfficeResponse.class);
+            }
+
+            OfficeResponse result = response.getBody();
+            logger.info("OnlyOffice保存响应: {}", result);
+
+            if (result == null)
+            {
+                logger.error("OnlyOffice保存失败：未接收到响应体");
+                return error("保存文档失败，请重试");
+            }
+
+            Integer errorCode = result.getError();
+            if (errorCode != 0 && errorCode != 4)
+            {
+                // error = 0: 保存成功
+                // error = 4: 文档没有做任何修改（也视为成功）
+                logger.error("OnlyOffice保存失败, error code: {}", errorCode);
+                return error("保存文档失败，错误码：" + errorCode);
+            }
+
+            // 2. 文档保存成功后，记录学生提交信息
+            logger.info("文档保存成功，开始记录提交信息");
+            int submitResult = expTaskSubmitService.submitTask(taskId, fileUrl, userId, userName);
+
+            if (submitResult > 0)
+            {
+                logger.info("任务提交成功, taskId: {}, userId: {}", taskId, userId);
+                return success("提交成功");
+            }
+            else
+            {
+                logger.error("记录提交信息失败");
+                return error("提交失败");
+            }
+        }
+        catch (Exception e)
+        {
+            logger.error("提交任务失败", e);
+            return error("提交失败：" + e.getMessage());
+        }
     }
 
     /**

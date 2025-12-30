@@ -103,13 +103,17 @@ export function getConfig(fileUrl, mode) {
 }
 
 // 提交任务
-export function submitTask(taskId, fileUrl) {
+// 接口地址: POST /Task/submit
+// 参数:
+//   - taskId: 任务ID
+//   - documentKey: OnlyOffice文档key（用于触发保存）
+export function submitTask(taskId, documentKey) {
   return request({
     url: '/Task/submit',
     method: 'post',
     data: {
       taskId: taskId,
-      fileUrl: fileUrl
+      documentKey: documentKey
     }
   })
 }
