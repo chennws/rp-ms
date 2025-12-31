@@ -100,6 +100,25 @@ export const constantRoutes = [
         meta: { title: '在线完成任务', activeMenu: '/task' }
       }
     ]
+  },
+  {
+    path: '/task/review',
+    component: Layout,
+    hidden: true,
+    children: [
+      {
+        path: ':taskId',
+        component: () => import('@/views/task/review-list'),
+        name: 'ReviewList',
+        meta: { title: '批改列表', activeMenu: '/review' }
+      },
+      {
+        path: ':taskId/:submitId',
+        component: () => import('@/views/task/review-detail'),
+        name: 'ReviewDetail',
+        meta: { title: '批改详情', activeMenu: '/review' }
+      }
+    ]
   }
 ]
 

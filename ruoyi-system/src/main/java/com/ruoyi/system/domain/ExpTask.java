@@ -66,6 +66,12 @@ public class ExpTask extends BaseEntity
     /** 总人数 */
     private Integer totalCount;
 
+    /** 已批改人数 */
+    private Integer reviewedCount;
+
+    /** 学生报告状态（仅学生端使用，0草稿 1已提交 2批阅中 3已批阅 4已打回 5重新提交） */
+    private String studentSubmitStatus;
+
     public void setTaskId(Long taskId) 
     {
         this.taskId = taskId;
@@ -149,14 +155,34 @@ public class ExpTask extends BaseEntity
         this.submitCount = submitCount;
     }
 
-    public Integer getTotalCount() 
+    public Integer getTotalCount()
     {
         return totalCount;
     }
 
-    public void setTotalCount(Integer totalCount) 
+    public void setTotalCount(Integer totalCount)
     {
         this.totalCount = totalCount;
+    }
+
+    public Integer getReviewedCount()
+    {
+        return reviewedCount;
+    }
+
+    public void setReviewedCount(Integer reviewedCount)
+    {
+        this.reviewedCount = reviewedCount;
+    }
+
+    public String getStudentSubmitStatus()
+    {
+        return studentSubmitStatus;
+    }
+
+    public void setStudentSubmitStatus(String studentSubmitStatus)
+    {
+        this.studentSubmitStatus = studentSubmitStatus;
     }
 
     @Override

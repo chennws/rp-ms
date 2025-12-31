@@ -40,6 +40,13 @@
             <scope>compile</scope>
         </dependency>
 
+        <!-- Stateless4j 状态机 -->
+        <dependency>
+            <groupId>com.github.oxo42</groupId>
+            <artifactId>stateless4j</artifactId>
+            <version>2.5.0</version>
+        </dependency>
+
     </dependencies>
 
 </project>

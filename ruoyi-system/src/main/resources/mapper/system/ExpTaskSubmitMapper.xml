@@ -1,0 +1,167 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper
+PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+"http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.ruoyi.system.mapper.ExpTaskSubmitMapper">
+
+    <resultMap type="ExpTaskSubmit" id="ExpTaskSubmitResult">
+        <result property="submitId"    column="submit_id"    />
+        <result property="taskId"    column="task_id"    />
+        <result property="userId"    column="user_id"    />
+        <result property="userName"    column="user_name"    />
+        <result property="fileUrl"    column="file_url"    />
+        <result property="documentKey"    column="document_key"    />
+        <result property="documentVersion"    column="document_version"    />
+        <result property="submitPending"    column="submit_pending"    />
+        <result property="submitTime"    column="submit_time"    />
+        <result property="status"    column="status"    />
+        <result property="score"    column="score"    />
+        <result property="teacherRemark"    column="teacher_remark"    />
+        <result property="rejectReason"    column="reject_reason"    />
+        <result property="createBy"    column="create_by"    />
+        <result property="createTime"    column="create_time"    />
+        <result property="updateBy"    column="update_by"    />
+        <result property="updateTime"    column="update_time"    />
+        <result property="remark"    column="remark"    />
+        <!-- ✅ 新增：真实姓名（从sys_user表获取） -->
+        <result property="nickName"    column="nick_name"    />
+    </resultMap>
+
+    <sql id="selectExpTaskSubmitVo">
+        select submit_id, task_id, user_id, user_name, file_url, document_key, document_version, submit_pending, submit_time, status, score, teacher_remark, reject_reason, create_by, create_time, update_by, update_time, remark
+        from exp_task_submit
+    </sql>
+
+    <select id="selectExpTaskSubmitList" parameterType="ExpTaskSubmit" resultMap="ExpTaskSubmitResult">
+        <include refid="selectExpTaskSubmitVo"/>
+        <where>
+            <if test="taskId != null"> and task_id = #{taskId}</if>
+            <if test="userId != null"> and user_id = #{userId}</if>
+            <if test="userName != null and userName != ''"> and user_name like concat('%', #{userName}, '%')</if>
+            <if test="status != null and status != ''"> and status = #{status}</if>
+        </where>
+        order by submit_time desc
+    </select>
+
+    <!-- ✅ 新增：查询包含所有学生的提交列表（教师批改列表专用） -->
+    <select id="selectExpTaskSubmitListWithAllStudents" parameterType="ExpTaskSubmit" resultMap="ExpTaskSubmitResult">
+        SELECT
+            u.user_id,
+            u.user_name,  /* ✅ 学号（从sys_user表获取） */
+            u.nick_name,  /* ✅ 姓名（从sys_user表获取） */
+            s.submit_id,
+            s.task_id,
+            s.file_url,
+            s.document_key,
+            s.document_version,
+            s.submit_pending,
+            s.submit_time,
+            s.status,
+            s.score,
+            s.teacher_remark,
+            s.reject_reason,
+            s.create_by,
+            s.create_time,
+            s.update_by,
+            s.update_time,
+            s.remark
+        FROM sys_user u
+        LEFT JOIN exp_task_submit s ON u.user_id = s.user_id AND s.task_id = #{taskId}
+        WHERE u.del_flag = '0'
+        AND u.dept_id = #{deptId}
+        <if test="status != null and status != ''">
+            AND s.status = #{status}
+        </if>
+        <if test="userName != null and userName != ''">
+            AND u.user_name like concat('%', #{userName}, '%')
+        </if>
+        ORDER BY
+            CASE
+                WHEN s.submit_time IS NOT NULL THEN 0
+                ELSE 1
+            END,
+            s.submit_time DESC,
+            u.user_name ASC
+    </select>
+
+    <select id="selectExpTaskSubmitBySubmitId" parameterType="Long" resultMap="ExpTaskSubmitResult">
+        <include refid="selectExpTaskSubmitVo"/>
+        where submit_id = #{submitId}
+    </select>
+
+    <select id="selectExpTaskSubmitByTaskIdAndUserId" resultMap="ExpTaskSubmitResult">
+        <include refid="selectExpTaskSubmitVo"/>
+        where task_id = #{taskId} and user_id = #{userId}
+    </select>
+
+    <insert id="insertExpTaskSubmit" parameterType="ExpTaskSubmit" useGeneratedKeys="true" keyProperty="submitId">
+        insert into exp_task_submit
+        <trim prefix="(" suffix=")" suffixOverrides=",">
+            <if test="taskId != null">task_id,</if>
+            <if test="userId != null">user_id,</if>
+            <if test="userName != null and userName != ''">user_name,</if>
+            <if test="fileUrl != null and fileUrl != ''">file_url,</if>
+            <if test="documentKey != null and documentKey != ''">document_key,</if>
+            <if test="documentVersion != null">document_version,</if>
+            <if test="submitPending != null">submit_pending,</if>
+            <if test="submitTime != null">submit_time,</if>
+            <if test="status != null">status,</if>
+            <if test="score != null">score,</if>
+            <if test="teacherRemark != null">teacher_remark,</if>
+            <if test="rejectReason != null">reject_reason,</if>
+            <if test="createBy != null and createBy != ''">create_by,</if>
+            <if test="remark != null">remark,</if>
+            create_time
+         </trim>
+        <trim prefix="values (" suffix=")" suffixOverrides=",">
+            <if test="taskId != null">#{taskId},</if>
+            <if test="userId != null">#{userId},</if>
+            <if test="userName != null and userName != ''">#{userName},</if>
+            <if test="fileUrl != null and fileUrl != ''">#{fileUrl},</if>
+            <if test="documentKey != null and documentKey != ''">#{documentKey},</if>
+            <if test="documentVersion != null">#{documentVersion},</if>
+            <if test="submitPending != null">#{submitPending},</if>
+            <if test="submitTime != null">#{submitTime},</if>
+            <if test="status != null">#{status},</if>
+            <if test="score != null">#{score},</if>
+            <if test="teacherRemark != null">#{teacherRemark},</if>
+            <if test="rejectReason != null">#{rejectReason},</if>
+            <if test="createBy != null and createBy != ''">#{createBy},</if>
+            <if test="remark != null">#{remark},</if>
+            sysdate()
+         </trim>
+    </insert>
+
+    <update id="updateExpTaskSubmit" parameterType="ExpTaskSubmit">
+        update exp_task_submit
+        <trim prefix="SET" suffixOverrides=",">
+            <if test="taskId != null">task_id = #{taskId},</if>
+            <if test="userId != null">user_id = #{userId},</if>
+            <if test="userName != null and userName != ''">user_name = #{userName},</if>
+            <if test="fileUrl != null and fileUrl != ''">file_url = #{fileUrl},</if>
+            <if test="documentKey != null and documentKey != ''">document_key = #{documentKey},</if>
+            <if test="documentVersion != null">document_version = #{documentVersion},</if>
+            <if test="submitPending != null">submit_pending = #{submitPending},</if>
+            <if test="submitTime != null">submit_time = #{submitTime},</if>
+            <if test="status != null">status = #{status},</if>
+            <if test="score != null">score = #{score},</if>
+            <if test="teacherRemark != null">teacher_remark = #{teacherRemark},</if>
+            <if test="rejectReason != null">reject_reason = #{rejectReason},</if>
+            <if test="updateBy != null and updateBy != ''">update_by = #{updateBy},</if>
+            <if test="remark != null">remark = #{remark},</if>
+            update_time = sysdate()
+        </trim>
+        where submit_id = #{submitId}
+    </update>
+
+    <delete id="deleteExpTaskSubmitBySubmitId" parameterType="Long">
+        delete from exp_task_submit where submit_id = #{submitId}
+    </delete>
+
+    <delete id="deleteExpTaskSubmitBySubmitIds" parameterType="String">
+        delete from exp_task_submit where submit_id in
+        <foreach item="submitId" collection="array" open="(" separator="," close=")">
+            #{submitId}
+        </foreach>
+    </delete>
+</mapper>

@@ -12,6 +12,7 @@ import com.ruoyi.system.service.IExpTaskSubmitService;
 import io.minio.MinioClient;
 import io.minio.PutObjectArgs;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.commons.codec.digest.DigestUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.json.JSONObject;
 import org.springframework.beans.factory.annotation.Value;
@@ -52,6 +53,8 @@ public class CallbackServiceImpl implements CallbackService {
     private MinioClient minioClient;
     @Resource
     private IExpTaskSubmitService expTaskSubmitService;
+    @Resource
+    private com.ruoyi.system.service.ReportStateMachineService reportStateMachineService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     /**
@@ -174,7 +177,7 @@ public class CallbackServiceImpl implements CallbackService {
         // 先保存文件
         this.handlerSave(callback, fileUrl);
 
-        // 保存成功后，检查是否有等待提交的记录
+        // 保存成功后，更新版本号（无论是学生提交还是教师批改）
         try {
             // 从fileUrl中解析taskId和userId
             // 文件URL格式: http://endpoint/bucketName/year/month/day/submit_taskId_userId_timestamp.extension
@@ -193,20 +196,65 @@ public class CallbackServiceImpl implements CallbackService {
 
                 // 查询提交记录
                 ExpTaskSubmit submit = expTaskSubmitService.selectExpTaskSubmitByTaskIdAndUserId(taskId, userId);
-                if (submit != null && submit.getSubmitPending() != null && submit.getSubmitPending() == 1) {
-                    // 如果正在提交中，更新提交时间并清除提交中标记
-                    submit.setSubmitTime(new Date());
-                    submit.setSubmitPending(0);
-                    expTaskSubmitService.updateExpTaskSubmit(submit);
-                    log.info("任务提交成功，已更新submit_time, taskId: {}, userId: {}", taskId, userId);
+                if (submit != null) {
+                    // ✅ 重要：无论什么情况，只要文件保存了，就更新版本号（解决教师批改后版本冲突问题）
+                    Integer currentVersion = submit.getDocumentVersion() != null ? submit.getDocumentVersion() : 1;
+                    Integer newVersion = currentVersion + 1;
+                    String newDocumentKey = DigestUtils.sha256Hex("task_" + taskId + "_user_" + userId + "_v" + newVersion);
+
+                    // 检查是否是学生提交（submitPending=1）
+                    boolean isStudentSubmit = submit.getSubmitPending() != null && submit.getSubmitPending() == 1;
+
+                    if (isStudentSubmit) {
+                        // 学生提交：先更新版本号和提交时间
+                        submit.setDocumentVersion(newVersion);
+                        submit.setDocumentKey(newDocumentKey);
+                        submit.setSubmitTime(new Date());
+                        submit.setSubmitPending(0);
+
+                        // ✅ 先更新数据库（版本号、提交时间、submitPending）
+                        expTaskSubmitService.updateExpTaskSubmit(submit);
+
+                        log.info("学生提交成功，已更新submit_time和版本号, taskId: {}, userId: {}, version: {} -> {}, newKey: {}",
+                            taskId, userId, currentVersion, newVersion, newDocumentKey);
+
+                        // ✅ 然后触发状态机转换（状态机会单独更新status字段）
+                        String currentStatus = submit.getStatus();
+                        try {
+                            if ("0".equals(currentStatus)) {
+                                // 草稿 -> 已提交
+                                reportStateMachineService.submitReport(submit.getSubmitId());
+                                log.info("状态机触发成功：草稿 -> 已提交, submitId: {}", submit.getSubmitId());
+                            } else if ("4".equals(currentStatus)) {
+                                // 已打回 -> 重新提交
+                                reportStateMachineService.resubmit(submit.getSubmitId());
+                                log.info("状态机触发成功：已打回 -> 重新提交, submitId: {}", submit.getSubmitId());
+                            } else {
+                                log.warn("当前状态{}不允许提交，submitId: {}", currentStatus, submit.getSubmitId());
+                            }
+                        } catch (Exception e) {
+                            log.error("状态机触发失败", e);
+                            // 不影响主流程，继续
+                        }
+                    } else {
+                        // 教师批改或其他情况：只更新版本号
+                        submit.setDocumentVersion(newVersion);
+                        submit.setDocumentKey(newDocumentKey);
+
+                        // 更新数据库
+                        expTaskSubmitService.updateExpTaskSubmit(submit);
+
+                        log.info("文档已保存（教师批改或编辑），已更新版本号, taskId: {}, userId: {}, version: {} -> {}, newKey: {}",
+                            taskId, userId, currentVersion, newVersion, newDocumentKey);
+                    }
                 } else {
-                    log.debug("未找到提交中的记录或已提交，taskId: {}, userId: {}", taskId, userId);
+                    log.warn("未找到提交记录，taskId: {}, userId: {}", taskId, userId);
                 }
             } else {
-                log.debug("文件名不符合提交副本格式，跳过提交状态更新: {}", objectName);
+                log.debug("文件名不符合提交副本格式，跳过版本号更新: {}", objectName);
             }
         } catch (Exception e) {
-            log.error("更新提交状态失败", e);
+            log.error("更新版本号失败", e);
             // 不抛出异常，避免影响文件保存
         }
     }
