@@ -8,7 +8,8 @@
       "Bash(mvn compile:*)",
       "Bash(npm run dev:*)",
       "Bash(tee:*)",
-      "Bash(echo:*)"
+      "Bash(echo:*)",
+      "Bash(dir:*)"
     ]
   }
 }

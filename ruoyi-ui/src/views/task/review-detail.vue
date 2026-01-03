@@ -4,7 +4,7 @@
     <div class="header-bar">
       <div class="left-section">
         <el-button icon="el-icon-back" size="small" @click="handleBack">返回列表</el-button>
-        <span class="title">📝 {{ submitInfo.userName }}的报告</span>
+        <span class="title">📝 {{ submitInfo.nickName }}的报告</span>
       </div>
       <div class="center-section">
         <span class="progress-text">已批改 {{ progress.reviewed }}/{{ progress.total }}</span>
@@ -68,10 +68,10 @@
             </div>
             <el-descriptions :column="1" size="small" border>
               <el-descriptions-item label="姓名" label-class-name="desc-label">
-                <span class="desc-value">{{ submitInfo.userName }}</span>
+                <span class="desc-value">{{ submitInfo.nickName }}</span>
               </el-descriptions-item>
               <el-descriptions-item label="学号" label-class-name="desc-label">
-                <span class="desc-value">{{ submitInfo.userId }}</span>
+                <span class="desc-value">{{ submitInfo.userName }}</span>
               </el-descriptions-item>
               <el-descriptions-item label="提交时间" label-class-name="desc-label">
                 <span class="desc-value">{{ parseTime(submitInfo.submitTime, '{y}-{m}-{d} {h}:{i}') }}</span>
@@ -152,15 +152,6 @@
                 size="small"
                 class="action-btn"
               >{{ viewOnly ? '只读模式' : '保存' }}</el-button>
-              <el-button
-                type="success"
-                icon="el-icon-d-arrow-right"
-                :loading="saving"
-                :disabled="!nextSubmitId || viewOnly"
-                @click="handleSaveAndNext"
-                size="small"
-                class="action-btn"
-              >保存并下一个</el-button>
               <el-button
                 type="warning"
                 icon="el-icon-refresh-left"
@@ -245,6 +236,8 @@ export default {
       loading: true,
       error: null,
       documentServerUrl: process.env.VUE_APP_DOCUMENT_SERVER_URL || 'http://47.115.163.152:9001/web-apps/apps/api/documents/api.js',
+      editorInitRetryCount: 0, // 编辑器初始化重试次数
+      maxRetryCount: 10, // 最大重试次数
       // 导航相关
       submitIdList: [],
       prevSubmitId: null,
@@ -268,6 +261,52 @@ export default {
         ]
       },
       rejecting: false
+    }
+  },
+  watch: {
+    // 监听路由参数变化（当从一个报告跳转到另一个报告时）
+    '$route'(to, from) {
+      // 必须确保两个路由都有 submitId 参数，且属于同一个任务
+      if (!to.params.submitId || !from.params.submitId) {
+        console.log('路由缺少 submitId 参数，跳过处理')
+        return
+      }
+
+      // 检查是否是同一个任务的不同报告
+      if (to.params.taskId === from.params.taskId && to.params.submitId !== from.params.submitId) {
+        console.log('路由参数变化，从报告', from.params.submitId, '跳转到', to.params.submitId)
+
+        // 验证新的 submitId 是否有效
+        const newSubmitId = parseInt(to.params.submitId)
+        if (isNaN(newSubmitId)) {
+          console.error('无效的 submitId:', to.params.submitId)
+          this.$modal.msgError("报告ID无效")
+          return
+        }
+
+        // 先销毁当前编辑器
+        if (this.editor) {
+          console.log('销毁旧的编辑器实例')
+          try {
+            this.editor.destroyEditor()
+          } catch (e) {
+            console.warn('销毁编辑器时出错:', e)
+          }
+          this.editor = null
+        }
+
+        // 重置状态
+        this.loading = true
+        this.error = null
+        this.editorInitRetryCount = 0
+
+        // 更新 submitId
+        this.submitId = newSubmitId
+
+        // 重新加载数据
+        this.loadSubmitDetail()
+        this.loadNextPrevInfo()
+      }
     }
   },
   created() {
@@ -363,12 +402,27 @@ export default {
       this.$nextTick(() => {
         const container = document.getElementById('onlyoffice-review')
         if (!container) {
-          console.error('找不到编辑器容器元素: #onlyoffice-review')
-          // 更友好的错误提示
-          this.error = '页面加载异常，编辑器容器未找到'
-          this.loading = false
+          // 检查重试次数
+          if (this.editorInitRetryCount >= this.maxRetryCount) {
+            console.error('容器元素初始化失败，已达最大重试次数')
+            this.error = '编辑器加载失败，请刷新页面重试'
+            this.loading = false
+            this.editorInitRetryCount = 0 // 重置计数器
+            return
+          }
+
+          console.warn(`容器元素暂时未找到，等待DOM渲染... (重试 ${this.editorInitRetryCount + 1}/${this.maxRetryCount})`)
+          this.editorInitRetryCount++
+          // 继续保持加载状态，而不是显示错误
+          // 延迟重试
+          setTimeout(() => {
+            this.initEditor()
+          }, 100)
           return
         }
+
+        // 容器找到了，重置重试计数器
+        this.editorInitRetryCount = 0
 
         // 动态加载 OnlyOffice API
         if (window.DocsAPI && window.DocsAPI.DocEditor) {
@@ -484,8 +538,21 @@ export default {
           // 检查容器是否还存在
           const container = document.getElementById('onlyoffice-review')
           if (!container) {
-            this.error = '页面加载异常，编辑器容器丢失'
-            this.loading = false
+            // 检查重试次数
+            if (this.editorInitRetryCount >= this.maxRetryCount) {
+              console.error('创建编辑器时容器丢失，已达最大重试次数')
+              this.error = '编辑器加载失败，请刷新页面重试'
+              this.loading = false
+              this.editorInitRetryCount = 0
+              return
+            }
+
+            console.warn(`创建编辑器时容器丢失，等待重新加载... (重试 ${this.editorInitRetryCount + 1}/${this.maxRetryCount})`)
+            this.editorInitRetryCount++
+            // 继续保持加载状态，延迟重试
+            setTimeout(() => {
+              this.initEditor()
+            }, 200)
             return
           }
 
@@ -520,6 +587,7 @@ export default {
     retryInit() {
       this.error = null
       this.loading = true
+      this.editorInitRetryCount = 0 // 重置重试计数器
       this.initEditor()
     },
     /** 获取用户ID */
@@ -575,49 +643,8 @@ export default {
         saveReview(data).then(() => {
           this.$modal.msgSuccess("批改保存成功")
           this.saving = false
-          // ✅ 只刷新提交信息，不重新初始化编辑器（避免容器丢失错误）
-          // 只需要更新状态等信息，不需要重新加载整个详情
-          getReviewDetail(this.submitId).then(response => {
-            // 只更新必要字段，不触发编辑器重新初始化
-            this.submitInfo.status = response.data.status
-            this.submitInfo.score = response.data.score
-            this.submitInfo.teacherRemark = response.data.teacherRemark
-            console.log('刷新提交信息成功，状态:', response.data.status)
-          }).catch(() => {
-            console.error('刷新提交信息失败')
-          })
-          // 重新加载待批改列表（因为当前报告状态可能已变化）
-          this.loadNextPrevInfo()
-        }).catch(() => {
-          this.saving = false
-        })
-      })
-    },
-    /** 保存并下一个 */
-    handleSaveAndNext() {
-      // 只读模式提示
-      if (this.viewOnly) {
-        this.$modal.msgWarning("当前为只读模式，无法保存")
-        return
-      }
 
-      this.$refs.form.validate(valid => {
-        if (!valid) {
-          return false
-        }
-
-        this.saving = true
-        const data = {
-          submitId: this.submitId,
-          score: this.form.score,
-          teacherRemark: this.form.teacherRemark
-        }
-
-        // ✅ saveReview 后端方法已包含状态转换逻辑，无需前端再调用状态机
-        saveReview(data).then(() => {
-          this.saving = false
-
-          // 重新加载待批改列表，因为当前报告已批改完成
+          // ✅ 保存成功后，检测是否有下一个待批改报告
           return getSubmitIdList(this.taskId)
         }).then(response => {
           const newSubmitIdList = response.data || []
@@ -625,36 +652,47 @@ export default {
 
           // 检查是否还有待批改的报告
           if (newSubmitIdList.length === 0) {
-            // 已经没有待批改的报告了，全部批改完成
-            this.$modal.msgSuccess("🎉 恭喜！所有报告批改完成！正在返回批改列表...")
+            // 没有待批改的了，跳转回批改列表
+            this.$message({
+              message: '所有报告已批改完成！',
+              type: 'success',
+              duration: 2000,
+              onClose: () => {
+                this.$router.push('/review')
+              }
+            })
+            // 延迟跳转，让用户看到提示信息
             setTimeout(() => {
-              this.$router.push(`/task/review/${this.taskId}`)
-            }, 2000)
-            return
-          }
+              this.$router.push('/review')
+            }, 1500)
+          } else {
+            // 还有待批改的，跳转到下一个
+            const nextId = newSubmitIdList[0]
 
-          // 找到下一个待批改的报告
-          const nextSubmitId = newSubmitIdList[0] // 直接取第一个
+            // 验证 nextId 是否有效
+            if (!nextId || isNaN(parseInt(nextId))) {
+              console.error('无效的下一个报告ID:', nextId)
+              this.$modal.msgError("获取下一个报告失败，返回批改列表")
+              setTimeout(() => {
+                this.$router.push('/review')
+              }, 1500)
+              return
+            }
 
-          if (nextSubmitId) {
-            this.$modal.msgSuccess("批改保存成功，正在跳转到下一个...")
+            this.$message({
+              message: `自动跳转到下一个待批改报告...`,
+              type: 'success',
+              duration: 1500
+            })
+            // 延迟跳转，路由 watch 会自动加载数据
             setTimeout(() => {
               this.$router.replace({
-                path: `/task/review/${this.taskId}/${nextSubmitId}`
+                path: `/task/review/${this.taskId}/${nextId}`
               })
-              // 重新加载数据
-              this.submitId = nextSubmitId
-              this.loadSubmitDetail()
-              this.loadNextPrevInfo()
-            }, 500)
-          } else {
-            // 理论上不会执行到这里
-            this.$modal.msgSuccess("🎉 所有报告批改完成！正在返回批改列表...")
-            setTimeout(() => {
-              this.$router.push(`/task/review/${this.taskId}`)
-            }, 1500)
+            }, 1000)
           }
-        }).catch(() => {
+        }).catch((error) => {
+          console.error('保存批改失败或获取列表失败:', error)
           this.saving = false
         })
       })
@@ -665,9 +703,7 @@ export default {
         this.$router.replace({
           path: `/task/review/${this.taskId}/${this.prevSubmitId}`
         })
-        this.submitId = this.prevSubmitId
-        this.loadSubmitDetail()
-        this.loadNextPrevInfo()
+        // 路由 watch 会自动加载数据
       }
     },
     /** 下一个 */
@@ -676,9 +712,7 @@ export default {
         this.$router.replace({
           path: `/task/review/${this.taskId}/${this.nextSubmitId}`
         })
-        this.submitId = this.nextSubmitId
-        this.loadSubmitDetail()
-        this.loadNextPrevInfo()
+        // 路由 watch 会自动加载数据
       }
     },
     /** 返回列表 */
@@ -706,14 +740,11 @@ export default {
           this.rejecting = false
           this.rejectDialogVisible = false
 
-          // 刷新页面或跳转
+          // 刷新页面或跳转（路由 watch 会自动加载数据）
           if (this.nextSubmitId) {
             this.$router.replace({
               path: `/task/review/${this.taskId}/${this.nextSubmitId}`
             })
-            this.submitId = this.nextSubmitId
-            this.loadSubmitDetail()
-            this.loadNextPrevInfo()
           } else {
             this.$router.push(`/task/review/${this.taskId}`)
           }
@@ -938,16 +969,15 @@ export default {
 .action-buttons {
   display: flex;
   flex-direction: row;
-  flex-wrap: wrap;
-  gap: 6px;
+  gap: 8px;
 }
 
 .action-btn {
-  flex: 1 1 calc(50% - 3px);
-  min-width: 75px;
-  height: 28px;
-  font-size: 12px;
-  padding: 5px 10px;
+  flex: 1;
+  min-width: 0;
+  height: 32px;
+  font-size: 13px;
+  padding: 0;
 }
 
 .readonly-notice {

@@ -85,13 +85,55 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
     </select>
 
     <select id="selectExpTaskSubmitBySubmitId" parameterType="Long" resultMap="ExpTaskSubmitResult">
-        <include refid="selectExpTaskSubmitVo"/>
-        where submit_id = #{submitId}
+        SELECT
+            s.submit_id,
+            s.task_id,
+            s.user_id,
+            s.user_name,
+            s.file_url,
+            s.document_key,
+            s.document_version,
+            s.submit_pending,
+            s.submit_time,
+            s.status,
+            s.score,
+            s.teacher_remark,
+            s.reject_reason,
+            s.create_by,
+            s.create_time,
+            s.update_by,
+            s.update_time,
+            s.remark,
+            u.nick_name  /* ✅ 从sys_user表获取学生真实姓名 */
+        FROM exp_task_submit s
+        LEFT JOIN sys_user u ON s.user_id = u.user_id
+        WHERE s.submit_id = #{submitId}
     </select>
 
     <select id="selectExpTaskSubmitByTaskIdAndUserId" resultMap="ExpTaskSubmitResult">
-        <include refid="selectExpTaskSubmitVo"/>
-        where task_id = #{taskId} and user_id = #{userId}
+        SELECT
+            s.submit_id,
+            s.task_id,
+            s.user_id,
+            s.user_name,
+            s.file_url,
+            s.document_key,
+            s.document_version,
+            s.submit_pending,
+            s.submit_time,
+            s.status,
+            s.score,
+            s.teacher_remark,
+            s.reject_reason,
+            s.create_by,
+            s.create_time,
+            s.update_by,
+            s.update_time,
+            s.remark,
+            u.nick_name  /* ✅ 从sys_user表获取学生真实姓名 */
+        FROM exp_task_submit s
+        LEFT JOIN sys_user u ON s.user_id = u.user_id
+        WHERE s.task_id = #{taskId} AND s.user_id = #{userId}
     </select>
 
     <insert id="insertExpTaskSubmit" parameterType="ExpTaskSubmit" useGeneratedKeys="true" keyProperty="submitId">

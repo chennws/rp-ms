@@ -155,6 +155,6 @@ docservice:
   # 使用NATAPP内网穿透地址，替换为你实际启动NATAPP后显示的地址
   # 重要：每次启动NATAPP后，需要检查地址是否变化（免费版地址会变）
   # 示例：http://server.natappfree.cc/Task/callback
-  callback: http://md5f296a.natappfree.cc/Task/callback
+  callback: http://y5498d29.natappfree.cc/Task/callback
   watermark:
     enable: true

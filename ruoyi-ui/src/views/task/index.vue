@@ -1,21 +1,5 @@
 <template>
   <div class="app-container task-index-container">
-    <!-- 顶部说明 -->
-    <el-alert
-      :title="isTeacher ? '实验任务管理' : '我的实验任务'"
-      type="info"
-      :closable="false"
-      show-icon
-      class="page-alert"
-    >
-      <template slot>
-        <div class="alert-content">
-          <span v-if="isTeacher">📚 在这里管理所有实验任务，发布新任务、编辑任务内容、查看学生提交情况。</span>
-          <span v-else>📝 查看所有实验任务，点击"在线完成"按钮开始做实验，提交后等待教师批改。</span>
-        </div>
-      </template>
-    </el-alert>
-
     <!-- 搜索栏 -->
     <el-card shadow="never" class="search-card">
       <el-form :model="queryParams" ref="queryForm" :inline="true" class="search-form" v-show="showSearch">
@@ -103,7 +87,7 @@
     <!-- 任务列表 -->
     <el-card shadow="never" class="table-card">
       <el-table v-loading="loading" :data="filteredTaskList" stripe class="task-table">
-        <el-table-column label="任务名称" prop="taskName" :show-overflow-tooltip="true" min-width="250">
+        <el-table-column label="任务名称" prop="taskName" :show-overflow-tooltip="true" min-width="200">
           <template slot-scope="scope">
             <div class="task-name">
               <i class="el-icon-document"></i>
@@ -111,27 +95,24 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="课程名称" prop="courseName" :show-overflow-tooltip="true" width="150" />
-        <el-table-column label="发布时间" align="center" prop="createTime" width="120">
+        <el-table-column label="课程" prop="courseName" :show-overflow-tooltip="true" width="120" />
+        <el-table-column label="发布时间" align="center" prop="createTime" width="105">
           <template slot-scope="scope">
             <span>{{ parseTime(scope.row.createTime, '{y}-{m}-{d}') }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="截止时间" align="center" prop="deadline" width="160">
+        <el-table-column label="截止时间" align="center" prop="deadline" width="145">
           <template slot-scope="scope">
-            <div class="deadline-cell">
-              <i class="el-icon-time"></i>
-              <span>{{ parseTime(scope.row.deadline, '{y}-{m}-{d} {h}:{i}') }}</span>
-            </div>
+            <span>{{ parseTime(scope.row.deadline, '{m}-{d} {h}:{i}') }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="提交情况" align="center" width="140">
+        <el-table-column label="提交情况" align="center" width="120">
           <template slot-scope="scope">
             <div class="submit-info">
               <el-progress
                 :percentage="getSubmitRateValue(scope.row)"
                 :color="getSubmitColor(scope.row)"
-                :stroke-width="16"
+                :stroke-width="14"
               >
                 <template slot="default">
                   <span class="progress-text">{{ scope.row.submitCount || 0 }}/{{ scope.row.totalCount || 0 }}</span>
@@ -140,42 +121,50 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="任务状态" align="center" width="100">
+        <el-table-column label="任务状态" align="center" width="85">
           <template slot-scope="scope">
-            <el-tag v-if="scope.row.status === '0'" type="warning" size="medium">未开始</el-tag>
-            <el-tag v-else-if="scope.row.status === '1'" type="primary" size="medium">进行中</el-tag>
-            <el-tag v-else-if="scope.row.status === '2'" type="success" size="medium">已结束</el-tag>
+            <el-tag v-if="scope.row.status === '0'" type="warning" size="small">未开始</el-tag>
+            <el-tag v-else-if="scope.row.status === '1'" type="primary" size="small">进行中</el-tag>
+            <el-tag v-else-if="scope.row.status === '2'" type="success" size="small">已结束</el-tag>
           </template>
         </el-table-column>
         <!-- 学生端显示报告状态 -->
-        <el-table-column v-if="!isTeacher" label="报告状态" align="center" width="100">
+        <el-table-column v-if="!isTeacher" label="报告状态" align="center" width="85">
           <template slot-scope="scope">
-            <el-tag v-if="!scope.row.studentSubmitStatus" type="info" size="medium">未开始</el-tag>
-            <el-tag v-else :type="getStateType(scope.row.studentSubmitStatus)" size="medium">
+            <el-tag v-if="!scope.row.studentSubmitStatus" type="info" size="small">未开始</el-tag>
+            <el-tag v-else :type="getStateType(scope.row.studentSubmitStatus)" size="small">
               {{ getStateDesc(scope.row.studentSubmitStatus) }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" align="center" class-name="small-padding fixed-width" width="280" fixed="right">
+        <el-table-column label="操作" align="center" class-name="small-padding fixed-width" :width="isTeacher ? 280 : 340" fixed="right">
           <template slot-scope="scope">
             <el-button
-              size="small"
+              size="mini"
               type="primary"
               icon="el-icon-view"
               @click="handleView(scope.row)"
               plain
             >查看</el-button>
+            <!-- 学生端：查看批改结果（仅已批阅状态显示） -->
+            <el-button
+              v-if="!isTeacher && scope.row.studentSubmitStatus === '3'"
+              size="mini"
+              type="success"
+              icon="el-icon-star-on"
+              @click="handleViewGrade(scope.row)"
+            >查看成绩</el-button>
             <!-- 学生端：在线完成 -->
             <el-button
               v-if="!isTeacher && scope.row.status === '1'"
-              size="small"
+              size="mini"
               type="success"
               icon="el-icon-edit-outline"
               @click="handleOnlineComplete(scope.row)"
             >在线完成</el-button>
             <el-button
               v-if="scope.row.status !== '2'"
-              size="small"
+              size="mini"
               type="warning"
               icon="el-icon-edit"
               @click="handleUpdate(scope.row)"
@@ -184,7 +173,7 @@
             >编辑</el-button>
             <el-button
               v-if="scope.row.status !== '2'"
-              size="small"
+              size="mini"
               type="danger"
               icon="el-icon-delete"
               @click="handleDelete(scope.row)"
@@ -193,7 +182,7 @@
             >删除</el-button>
             <el-button
               v-if="scope.row.status === '2'"
-              size="small"
+              size="mini"
               type="info"
               icon="el-icon-data-analysis"
               @click="handleStatistics(scope.row)"
@@ -218,7 +207,8 @@
     <el-dialog :title="title" :visible.sync="open" width="600px" append-to-body>
       <el-form ref="form" :model="form" :rules="rules" label-width="100px">
         <el-form-item label="任务名称" prop="taskName">
-          <el-input v-model="form.taskName" placeholder="请输入任务名称" />
+          <el-input v-model="form.taskName" placeholder="请输入任务名称，例如：实验一、实验二" />
+          <span class="form-tip">建议格式：实验一、实验二、实验三...</span>
         </el-form-item>
         <el-form-item label="课程名称" prop="courseName">
           <el-input v-model="form.courseName" placeholder="请输入课程名称" />
@@ -276,11 +266,61 @@
         <el-button @click="viewOpen = false">关 闭</el-button>
       </div>
     </el-dialog>
+
+    <!-- 学生端：查看批改结果对话框 -->
+    <el-dialog title="批改结果" :visible.sync="gradeOpen" width="600px" append-to-body>
+      <div v-if="gradeForm.score !== null && gradeForm.score !== undefined" class="grade-content">
+        <!-- 成绩卡片 -->
+        <el-card shadow="hover" class="grade-card">
+          <div class="grade-header">
+            <i class="el-icon-trophy grade-icon"></i>
+            <span class="grade-label">成绩</span>
+          </div>
+          <div class="grade-score">{{ gradeForm.score }}</div>
+          <div class="grade-footer">满分100分</div>
+        </el-card>
+
+        <!-- 评语区域 -->
+        <el-card shadow="hover" class="remark-card" v-if="gradeForm.teacherRemark">
+          <div class="remark-header">
+            <i class="el-icon-chat-dot-round remark-icon"></i>
+            <span class="remark-label">教师评语</span>
+          </div>
+          <div class="remark-content">{{ gradeForm.teacherRemark }}</div>
+        </el-card>
+
+        <!-- 如果没有评语 -->
+        <el-card shadow="hover" class="remark-card" v-else>
+          <div class="remark-header">
+            <i class="el-icon-chat-dot-round remark-icon"></i>
+            <span class="remark-label">教师评语</span>
+          </div>
+          <div class="remark-content empty">暂无评语</div>
+        </el-card>
+
+        <!-- 提交信息 -->
+        <el-descriptions :column="1" border class="submit-info">
+          <el-descriptions-item label="提交时间">
+            {{ parseTime(gradeForm.submitTime, '{y}-{m}-{d} {h}:{i}:{s}') }}
+          </el-descriptions-item>
+          <el-descriptions-item label="批阅状态">
+            <el-tag type="success" size="small">已批阅</el-tag>
+          </el-descriptions-item>
+        </el-descriptions>
+      </div>
+      <div v-else class="no-grade">
+        <i class="el-icon-warning"></i>
+        <p>暂未评分</p>
+      </div>
+      <div slot="footer" class="dialog-footer">
+        <el-button type="primary" @click="gradeOpen = false">关 闭</el-button>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
 <script>
-import { listTask, getTask, delTask, addTask, updateTask, downloadReport } from "@/api/task/task"
+import { listTask, getTask, delTask, addTask, updateTask, downloadReport, getMySubmitDetail } from "@/api/task/task"
 import { listDeptForTask } from "@/api/system/dept"
 import { handleTree } from "@/utils/ruoyi"
 import Treeselect from "@riophae/vue-treeselect"
@@ -307,6 +347,8 @@ export default {
       open: false,
       // 是否显示查看详情弹出层
       viewOpen: false,
+      // 是否显示查看成绩弹出层
+      gradeOpen: false,
       // 部门树选项
       deptOptions: undefined,
       // 查询参数
@@ -319,6 +361,8 @@ export default {
       form: {},
       // 查看详情表单
       viewForm: {},
+      // 查看成绩表单
+      gradeForm: {},
       // 学生端：当前选中的状态标签
       activeStatusTab: 'all',
       // 学生端：各状态的任务数量
@@ -335,7 +379,12 @@ export default {
       // 表单校验
       rules: {
         taskName: [
-          { required: true, message: "任务名称不能为空", trigger: "blur" }
+          { required: true, message: "任务名称不能为空", trigger: "blur" },
+          {
+            pattern: /^实验[一二三四五六七八九十\d]+$/,
+            message: "任务名称建议格式：实验一、实验二、实验三...",
+            trigger: "blur"
+          }
         ],
         courseName: [
           { required: true, message: "课程名称不能为空", trigger: "blur" }
@@ -379,6 +428,10 @@ export default {
     }
   },
   created() {
+    this.getList()
+  },
+  activated() {
+    // 页面激活时刷新列表（从编辑页面返回时）
     this.getList()
   },
   methods: {
@@ -529,6 +582,15 @@ export default {
         this.viewOpen = true
       })
     },
+    /** 学生端：查看批改结果 */
+    handleViewGrade(row) {
+      getMySubmitDetail(row.taskId).then(response => {
+        this.gradeForm = response.data
+        this.gradeOpen = true
+      }).catch(err => {
+        this.$modal.msgError("获取批改结果失败")
+      })
+    },
     /** 下载实验报告 */
     handleDownloadReport() {
       if (!this.viewForm.reportFileUrl) {
@@ -634,17 +696,6 @@ export default {
   min-height: calc(100vh - 84px);
 }
 
-/* 页面提示 */
-.page-alert {
-  margin-bottom: 20px;
-  border-radius: 8px;
-}
-
-.alert-content {
-  font-size: 14px;
-  line-height: 1.6;
-}
-
 /* 搜索卡片 */
 .search-card {
   margin-bottom: 20px;
@@ -734,7 +785,7 @@ export default {
 }
 
 .progress-text {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
 }
 
@@ -747,15 +798,15 @@ export default {
 
 /* 进度条样式优化 */
 .task-table ::v-deep .el-progress__text {
-  font-size: 12px !important;
+  font-size: 11px !important;
 }
 
 .task-table ::v-deep .el-progress-bar__inner {
-  border-radius: 9px;
+  border-radius: 7px;
 }
 
 .task-table ::v-deep .el-progress-bar__outer {
-  border-radius: 9px;
+  border-radius: 7px;
   background-color: #e4e7ed;
 }
 
@@ -765,8 +816,125 @@ export default {
 }
 
 /* 操作按钮样式 */
+.task-table .el-button--mini {
+  padding: 5px 10px;
+  font-size: 12px;
+  margin: 1px;
+}
+
 .task-table .el-button {
-  margin: 2px;
+  margin: 1px;
+}
+
+/* 表单提示 */
+.form-tip {
+  display: block;
+  margin-top: 5px;
+  font-size: 12px;
+  color: #909399;
+  line-height: 1.5;
+}
+
+/* 批改结果对话框样式 */
+.grade-content {
+  padding: 10px 0;
+}
+
+.grade-card {
+  margin-bottom: 20px;
+  text-align: center;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border-radius: 12px;
+}
+
+.grade-card ::v-deep .el-card__body {
+  padding: 30px;
+}
+
+.grade-header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 15px;
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.grade-icon {
+  font-size: 24px;
+  margin-right: 8px;
+  color: #ffd700;
+}
+
+.grade-score {
+  font-size: 56px;
+  font-weight: bold;
+  margin: 20px 0;
+  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.grade-footer {
+  font-size: 14px;
+  opacity: 0.9;
+}
+
+.remark-card {
+  margin-bottom: 20px;
+  border-radius: 8px;
+}
+
+.remark-header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 15px;
+  font-size: 16px;
+  font-weight: 500;
+  color: #303133;
+}
+
+.remark-icon {
+  font-size: 20px;
+  margin-right: 8px;
+  color: #409EFF;
+}
+
+.remark-content {
+  font-size: 15px;
+  line-height: 1.8;
+  color: #606266;
+  background: #f5f7fa;
+  padding: 15px;
+  border-radius: 6px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.remark-content.empty {
+  color: #909399;
+  font-style: italic;
+  text-align: center;
+}
+
+.submit-info {
+  margin-top: 10px;
+}
+
+.no-grade {
+  text-align: center;
+  padding: 60px 0;
+  color: #909399;
+}
+
+.no-grade i {
+  font-size: 64px;
+  margin-bottom: 20px;
+  display: block;
+}
+
+.no-grade p {
+  font-size: 16px;
+  margin: 0;
 }
 </style>
 

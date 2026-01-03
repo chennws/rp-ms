@@ -143,7 +143,9 @@ public class CallbackServiceImpl implements CallbackService {
 //        String changesUri = callback.getChangesurl();
 //        String key = callback.getKey();
 //        String downloadExt = callback.getFiletype();
-        String objectName = fileUrl.replace(this.endpoint + "/" + this.bucketName + "/", "");
+        // ✅ 移除URL参数（如果有），只保留路径部分
+        String fileUrlWithoutParams = fileUrl.split("\\?")[0];
+        String objectName = fileUrlWithoutParams.replace(this.endpoint + "/" + this.bucketName + "/", "");
         // 从文件转换服务中下载文件
         RestTemplate restTemplate = new RestTemplate();
         // 设置请求头
@@ -181,7 +183,9 @@ public class CallbackServiceImpl implements CallbackService {
         try {
             // 从fileUrl中解析taskId和userId
             // 文件URL格式: http://endpoint/bucketName/year/month/day/submit_taskId_userId_timestamp.extension
-            String objectName = fileUrl.replace(this.endpoint + "/" + this.bucketName + "/", "");
+            // ✅ 移除URL参数（如果有），只保留路径部分
+            String fileUrlWithoutParams = fileUrl.split("\\?")[0];
+            String objectName = fileUrlWithoutParams.replace(this.endpoint + "/" + this.bucketName + "/", "");
 
             // 使用正则表达式提取taskId和userId
             // 匹配模式：submit_数字_数字_数字.扩展名

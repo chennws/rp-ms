@@ -69,6 +69,9 @@ public class ExpTask extends BaseEntity
     /** 已批改人数 */
     private Integer reviewedCount;
 
+    /** 待批改人数 */
+    private Integer pendingCount;
+
     /** 学生报告状态（仅学生端使用，0草稿 1已提交 2批阅中 3已批阅 4已打回 5重新提交） */
     private String studentSubmitStatus;
 
@@ -173,6 +176,16 @@ public class ExpTask extends BaseEntity
     public void setReviewedCount(Integer reviewedCount)
     {
         this.reviewedCount = reviewedCount;
+    }
+
+    public Integer getPendingCount()
+    {
+        return pendingCount;
+    }
+
+    public void setPendingCount(Integer pendingCount)
+    {
+        this.pendingCount = pendingCount;
     }
 
     public String getStudentSubmitStatus()

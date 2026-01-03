@@ -100,6 +100,9 @@ public class ExpTaskController extends BaseController
     private MinioConfig minioConfig;
 
     @Autowired
+    private com.ruoyi.system.service.ExcelTemplateExportService excelTemplateExportService;
+
+    @Autowired
     private com.ruoyi.system.service.ReportStateMachineService reportStateMachineService;
 
     @Resource
@@ -868,7 +871,7 @@ public class ExpTaskController extends BaseController
     }
 
     /**
-     * 获取批改详情
+     * 获取批改详情（教师端）
      */
     @PreAuthorize("@ss.hasPermi('task:task:add')")
     @GetMapping("/submit/{submitId}")
@@ -887,6 +890,34 @@ public class ExpTaskController extends BaseController
         {
             logger.error("获取批改详情失败", e);
             return error("获取批改详情失败：" + e.getMessage());
+        }
+    }
+
+    /**
+     * 学生端：查看自己的提交详情（包括评分和评语）
+     */
+    @GetMapping("/submit/my/{taskId}")
+    public AjaxResult getMySubmitDetail(@PathVariable Long taskId)
+    {
+        try
+        {
+            // 获取当前登录学生的用户ID
+            Long userId = SecurityUtils.getUserId();
+
+            // 查询该学生在该任务下的提交记录
+            ExpTaskSubmit submit = expTaskSubmitService.selectExpTaskSubmitByTaskIdAndUserId(taskId, userId);
+
+            if (submit == null)
+            {
+                return error("未找到提交记录");
+            }
+
+            return success(submit);
+        }
+        catch (Exception e)
+        {
+            logger.error("学生查看提交详情失败", e);
+            return error("查看提交详情失败：" + e.getMessage());
         }
     }
 
@@ -980,7 +1011,7 @@ public class ExpTaskController extends BaseController
     }
 
     /**
-     * 批量导出成绩
+     * 批量导出成绩（基于模板）
      */
     @PreAuthorize("@ss.hasPermi('task:task:add')")
     @Log(title = "导出成绩", businessType = BusinessType.EXPORT)
@@ -989,17 +1020,100 @@ public class ExpTaskController extends BaseController
     {
         try
         {
+            // 1. 获取任务信息
             ExpTask task = expTaskService.selectExpTaskByTaskId(taskId);
+
+            // 2. 获取该任务所属部门的所有学生提交记录（包括未提交的）
             ExpTaskSubmit querySubmit = new ExpTaskSubmit();
             querySubmit.setTaskId(taskId);
-            List<ExpTaskSubmit> list = expTaskSubmitService.selectExpTaskSubmitList(querySubmit);
+            querySubmit.setDeptId(task.getDeptId());
+            List<ExpTaskSubmit> list = expTaskSubmitService.selectExpTaskSubmitListWithAllStudents(querySubmit);
 
-            ExcelUtil<ExpTaskSubmit> util = new ExcelUtil<>(ExpTaskSubmit.class);
-            util.exportExcel(response, list, task.getTaskName() + "-成绩单");
+            // 3. 使用模板导出服务导出成绩
+            excelTemplateExportService.exportGradesByTemplate(task, list, response);
         }
         catch (Exception e)
         {
             logger.error("导出成绩失败", e);
+            try {
+                response.setContentType("application/json");
+                response.setCharacterEncoding("utf-8");
+                response.getWriter().write("{\"msg\":\"导出成绩失败：" + e.getMessage() + "\",\"code\":500}");
+            } catch (IOException ioException) {
+                logger.error("写入错误响应失败", ioException);
+            }
+        }
+    }
+
+    /**
+     * 批量导出多个任务的成绩（基于模板）
+     */
+    @PreAuthorize("@ss.hasPermi('task:task:add')")
+    @Log(title = "批量导出成绩", businessType = BusinessType.EXPORT)
+    @PostMapping("/submit/batchExport")
+    public void batchExportGrades(@RequestParam String taskIds, HttpServletResponse response)
+    {
+        try
+        {
+            // 1. 解析任务ID列表
+            String[] taskIdArray = taskIds.split(",");
+            List<Long> taskIdList = new java.util.ArrayList<>();
+            for (String idStr : taskIdArray) {
+                taskIdList.add(Long.parseLong(idStr.trim()));
+            }
+
+            // 2. 获取所有任务信息
+            List<ExpTask> tasks = new java.util.ArrayList<>();
+            for (Long taskId : taskIdList) {
+                ExpTask task = expTaskService.selectExpTaskByTaskId(taskId);
+                if (task != null) {
+                    tasks.add(task);
+                }
+            }
+
+            if (tasks.isEmpty()) {
+                throw new RuntimeException("未找到任务信息");
+            }
+
+            // 3. 验证：检查是否为同一部门
+            Long deptId = tasks.get(0).getDeptId();
+            for (ExpTask task : tasks) {
+                if (!task.getDeptId().equals(deptId)) {
+                    throw new RuntimeException("只能导出同一部门的任务成绩");
+                }
+            }
+
+            // 4. 验证：检查是否为同一课程
+            String courseName = tasks.get(0).getCourseName();
+            for (ExpTask task : tasks) {
+                if (!task.getCourseName().equals(courseName)) {
+                    throw new RuntimeException("只能导出同一课程的任务成绩");
+                }
+            }
+
+            // 5. 获取每个任务的学生提交记录
+            Map<Long, List<ExpTaskSubmit>> submitListMap = new java.util.HashMap<>();
+            for (ExpTask task : tasks) {
+                ExpTaskSubmit querySubmit = new ExpTaskSubmit();
+                querySubmit.setTaskId(task.getTaskId());
+                querySubmit.setDeptId(task.getDeptId());
+                List<ExpTaskSubmit> list = expTaskSubmitService.selectExpTaskSubmitListWithAllStudents(querySubmit);
+                submitListMap.put(task.getTaskId(), list);
+            }
+
+            // 6. 使用模板导出服务批量导出成绩
+            excelTemplateExportService.batchExportGradesByTemplate(tasks, submitListMap, response);
+        }
+        catch (Exception e)
+        {
+            logger.error("批量导出成绩失败", e);
+            try {
+                response.setContentType("application/json");
+                response.setCharacterEncoding("utf-8");
+                response.getWriter().write("{\"msg\":\"批量导出成绩失败：" + e.getMessage() + "\",\"code\":500}");
+            } catch (IOException ioException) {
+                logger.error("写入错误响应失败", ioException);
+            }
         }
     }
 

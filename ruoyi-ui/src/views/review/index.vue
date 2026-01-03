@@ -1,20 +1,5 @@
 <template>
   <div class="app-container review-index-container">
-    <!-- 顶部说明 -->
-    <el-alert
-      title="报告批改"
-      type="info"
-      :closable="false"
-      show-icon
-      class="page-alert"
-    >
-      <template slot>
-        <div class="alert-content">
-          <span>📋 这里显示所有需要批改的实验任务，点击"批改报告"按钮进入批改页面查看学生提交的报告。</span>
-        </div>
-      </template>
-    </el-alert>
-
     <!-- 搜索栏 -->
     <el-card shadow="never" class="search-card">
       <el-form :model="queryParams" ref="queryForm" :inline="true" class="search-form">
@@ -40,12 +25,28 @@
           <el-button type="primary" icon="el-icon-search" @click="handleQuery">搜索</el-button>
           <el-button icon="el-icon-refresh" @click="resetQuery">重置</el-button>
         </el-form-item>
+        <el-form-item style="float: right">
+          <el-button
+            type="success"
+            icon="el-icon-download"
+            :disabled="selectedTasks.length === 0"
+            @click="handleBatchExport"
+          >批量导出成绩 ({{ selectedTasks.length }})</el-button>
+        </el-form-item>
       </el-form>
     </el-card>
 
     <!-- 任务列表 -->
     <el-card shadow="never" class="table-card">
-      <el-table v-loading="loading" :data="taskList" stripe class="review-table">
+      <el-table
+        v-loading="loading"
+        :data="taskList"
+        stripe
+        class="review-table"
+        @selection-change="handleSelectionChange"
+        ref="taskTable"
+      >
+        <el-table-column type="selection" width="55" align="center" />
         <el-table-column label="任务名称" prop="taskName" :show-overflow-tooltip="true" min-width="200">
           <template slot-scope="scope">
             <div class="task-name">
@@ -86,15 +87,7 @@
         <el-table-column label="批改进度" align="center" width="140">
           <template slot-scope="scope">
             <div class="review-progress">
-              <el-progress
-                :percentage="getReviewProgress(scope.row)"
-                :color="getProgressColor(scope.row)"
-                :stroke-width="16"
-              >
-                <template slot="default">
-                  <span class="progress-text">{{ scope.row.reviewedCount || 0 }}/{{ scope.row.submitCount || 0 }}</span>
-                </template>
-              </el-progress>
+              <span class="pending-count">待批改：{{ scope.row.pendingCount || 0 }}</span>
             </div>
           </template>
         </el-table-column>
@@ -145,6 +138,8 @@ export default {
       total: 0,
       // 任务列表
       taskList: [],
+      // 选中的任务列表
+      selectedTasks: [],
       // 查询参数
       queryParams: {
         pageNum: 1,
@@ -155,6 +150,10 @@ export default {
     }
   },
   created() {
+    this.getList()
+  },
+  activated() {
+    // 页面激活时刷新列表（从批改详情页面返回时）
     this.getList()
   },
   methods: {
@@ -187,6 +186,63 @@ export default {
           taskName: row.taskName
         }
       })
+    },
+    /** 多选框选中数据 */
+    handleSelectionChange(selection) {
+      this.selectedTasks = selection
+    },
+    /** 批量导出成绩 */
+    handleBatchExport() {
+      if (this.selectedTasks.length === 0) {
+        this.$modal.msgWarning('请至少选择一个任务')
+        return
+      }
+
+      // 验证：检查是否为同一部门
+      const deptIds = [...new Set(this.selectedTasks.map(task => task.deptId))]
+      if (deptIds.length > 1) {
+        this.$modal.msgError('只能导出同一部门的任务成绩')
+        return
+      }
+
+      // 验证：检查是否为同一课程
+      const courseNames = [...new Set(this.selectedTasks.map(task => task.courseName))]
+      if (courseNames.length > 1) {
+        this.$modal.msgError('只能导出同一课程的任务成绩')
+        return
+      }
+
+      // 确认导出
+      const taskNames = this.selectedTasks.map(t => t.taskName).join('、')
+      const deptName = this.selectedTasks[0].deptName
+      const courseName = this.selectedTasks[0].courseName
+
+      this.$confirm(
+        `将导出以下任务的成绩：<br/><br/>` +
+        `<strong>部门：</strong>${deptName}<br/>` +
+        `<strong>课程：</strong>${courseName}<br/>` +
+        `<strong>任务：</strong>${taskNames}<br/><br/>` +
+        `是否继续？`,
+        '确认导出',
+        {
+          confirmButtonText: '确定',
+          cancelButtonText: '取消',
+          type: 'warning',
+          dangerouslyUseHTMLString: true
+        }
+      ).then(() => {
+        // 获取选中的任务ID列表
+        const taskIds = this.selectedTasks.map(t => t.taskId).join(',')
+
+        // 调用导出接口
+        this.download(
+          '/Task/submit/batchExport',
+          { taskIds: taskIds },
+          `${courseName}-成绩登记表.xlsx`
+        )
+
+        this.$modal.msgSuccess('导出成功')
+      }).catch(() => {})
     },
     /** 获取提交标签类型 */
     getSubmitTagType(row) {
@@ -234,17 +290,6 @@ export default {
 .review-index-container {
   background-color: #f0f2f5;
   min-height: calc(100vh - 84px);
-}
-
-/* 页面提示 */
-.page-alert {
-  margin-bottom: 20px;
-  border-radius: 8px;
-}
-
-.alert-content {
-  font-size: 14px;
-  line-height: 1.6;
 }
 
 /* 搜索卡片 */
@@ -311,6 +356,12 @@ export default {
 /* 批改进度 */
 .review-progress {
   padding: 4px 0;
+}
+
+.pending-count {
+  font-size: 14px;
+  font-weight: 600;
+  color: #606266;
 }
 
 /* 操作按钮 */

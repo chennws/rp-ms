@@ -21,14 +21,16 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         <result property="submitCount"    column="submit_count"    />
         <result property="totalCount"    column="total_count"    />
         <result property="reviewedCount"    column="reviewed_count"    />
+        <result property="pendingCount"    column="pending_count"    />
     </resultMap>
 
     <sql id="selectExpTaskVo">
         select t.task_id, t.task_name, t.course_name, t.dept_id, t.deadline, t.status, t.create_by, t.create_time, t.update_by, t.update_time, t.remark, t.report_file_url,
                d.dept_name,
-               (SELECT COUNT(*) FROM exp_task_submit WHERE task_id = t.task_id AND submit_time IS NOT NULL) as submit_count,
-               (SELECT COUNT(*) FROM sys_user WHERE dept_id = t.dept_id) as total_count,
-               (SELECT COUNT(*) FROM exp_task_submit WHERE task_id = t.task_id AND status = '1') as reviewed_count
+               (SELECT COUNT(*) FROM exp_task_submit WHERE task_id = t.task_id AND status IN ('1', '2', '3', '5', '6')) as submit_count,
+               (SELECT COUNT(*) FROM sys_user WHERE dept_id = t.dept_id AND del_flag = '0') as total_count,
+               (SELECT COUNT(*) FROM exp_task_submit WHERE task_id = t.task_id AND status IN ('3', '6')) as reviewed_count,
+               (SELECT COUNT(*) FROM exp_task_submit WHERE task_id = t.task_id AND status IN ('1', '2', '5')) as pending_count
         from exp_task t
         left join sys_dept d on t.dept_id = d.dept_id
     </sql>

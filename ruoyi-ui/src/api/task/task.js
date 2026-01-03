@@ -148,3 +148,11 @@ export function checkSubmitStatus(taskId) {
     }
   })
 }
+
+// 学生端：查看自己的提交详情（包括评分和评语）
+export function getMySubmitDetail(taskId) {
+  return request({
+    url: `/Task/submit/my/${taskId}`,
+    method: 'get'
+  })
+}

@@ -162,13 +162,27 @@ public class ConfigServiceImpl implements ConfigService {
             }
         }
         String suffix = this.getExtension(fileUrl);
+
+        // ✅ 在文件URL后添加版本参数，避免OnlyOffice缓存导致的版本冲突
+        // 当老师批改并打回后，学生再次打开时，会使用新的版本号，强制OnlyOffice重新加载文件
+        String urlWithVersion = fileUrl;
+        if (StringUtils.isNotEmpty(key)) {
+            // 使用documentKey的前8位作为版本标识
+            String versionParam = key.substring(0, Math.min(8, key.length()));
+            // 判断URL是否已包含参数
+            String separator = fileUrl.contains("?") ? "&" : "?";
+            urlWithVersion = fileUrl + separator + "v=" + versionParam;
+            log.debug("添加版本参数到URL: {}", urlWithVersion);
+        }
+
         return Document.builder()
                 // docx | pptx | xlsx | pdf ， 获取文件后缀
                 .fileType(suffix)
                 .key(key)
                 .title(documentName)
                 // 文档下载地址，这个地址提供给文档转换服务，用于下载文档。
-                .url(fileUrl)
+                // ✅ 使用带版本参数的URL，确保OnlyOffice重新下载最新文件
+                .url(urlWithVersion)
                 .info(this.getInfo())
                 .permissions(this.getPermissions())
                 .build();

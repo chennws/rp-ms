@@ -219,6 +219,11 @@ export default {
     this.loadTaskInfo()
     this.getList()
   },
+  activated() {
+    // 页面激活时刷新列表（从批改详情页面返回时）
+    this.loadTaskInfo()
+    this.getList()
+  },
   methods: {
     /** 加载任务信息 */
     loadTaskInfo() {
