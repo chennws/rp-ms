@@ -1,6 +1,8 @@
 package com.ruoyi.system.domain;
 
+import java.math.BigDecimal;
 import java.util.Date;
+import java.util.List;
 
 import javax.validation.constraints.NotBlank;
 import javax.validation.constraints.NotNull;
@@ -74,6 +76,20 @@ public class ExpTask extends BaseEntity
 
     /** 学生报告状态（仅学生端使用，0草稿 1已提交 2批阅中 3已批阅 4已打回 5重新提交） */
     private String studentSubmitStatus;
+
+    /** 学生报告分数（仅学生端使用） */
+    private BigDecimal score;
+
+    /** 学生报告批阅时间（仅学生端使用） */
+    @JsonFormat(pattern = "yyyy-MM-dd HH:mm:ss")
+    private Date reviewTime;
+
+    /** 学年学期（格式：2023-2024学年第一学期） */
+    @Excel(name = "学年学期")
+    private String academicTerm;
+
+    /** 多个部门ID（用于新增任务时多选部门，不持久化到数据库） */
+    private transient List<Long> deptIds;
 
     public void setTaskId(Long taskId) 
     {
@@ -196,6 +212,46 @@ public class ExpTask extends BaseEntity
     public void setStudentSubmitStatus(String studentSubmitStatus)
     {
         this.studentSubmitStatus = studentSubmitStatus;
+    }
+
+    public BigDecimal getScore()
+    {
+        return score;
+    }
+
+    public void setScore(BigDecimal score)
+    {
+        this.score = score;
+    }
+
+    public Date getReviewTime()
+    {
+        return reviewTime;
+    }
+
+    public void setReviewTime(Date reviewTime)
+    {
+        this.reviewTime = reviewTime;
+    }
+
+    public String getAcademicTerm()
+    {
+        return academicTerm;
+    }
+
+    public void setAcademicTerm(String academicTerm)
+    {
+        this.academicTerm = academicTerm;
+    }
+
+    public List<Long> getDeptIds()
+    {
+        return deptIds;
+    }
+
+    public void setDeptIds(List<Long> deptIds)
+    {
+        this.deptIds = deptIds;
     }
 
     @Override

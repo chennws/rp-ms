@@ -6,12 +6,9 @@ import java.io.UnsupportedEncodingException;
 import java.security.InvalidKeyException;
 import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
+import java.util.*;
 import java.util.regex.Pattern;
+import java.util.regex.Matcher;
 
 import javax.annotation.Resource;
 import javax.servlet.http.HttpServletRequest;
@@ -105,6 +102,9 @@ public class ExpTaskController extends BaseController
     @Autowired
     private com.ruoyi.system.service.ReportStateMachineService reportStateMachineService;
 
+    @Autowired
+    private com.ruoyi.system.service.ISysDeptService deptService;
+
     @Resource
     private ConfigService configService;
 
@@ -124,6 +124,200 @@ public class ExpTaskController extends BaseController
     private String endpoint;
     @Value("${minio.bucket-name}")
     private String bucketName;
+    /**
+     * 查询实验任务列表（树形结构：部门-课程-任务）
+     */
+    @PreAuthorize("@ss.hasPermi('task:task:list')")
+    @GetMapping("/tree")
+    public AjaxResult getTaskTree(ExpTask expTask)
+    {
+        LoginUser loginUser = getLoginUser();
+
+        // 教师只能查询自己发布的任务
+        if (loginUser != null && loginUser.getUser() != null && !loginUser.getUser().isAdmin())
+        {
+            boolean isTeacher = SecurityUtils.hasPermi(loginUser.getPermissions(), "task:task:add");
+            if (isTeacher)
+            {
+                expTask.setCreateBy(getUsername());
+            }
+        }
+
+        // 查询所有任务
+        List<ExpTask> taskList = expTaskService.selectExpTaskList(expTask);
+
+        // 构建树形结构
+        List<Map<String, Object>> treeData = buildTreeData(taskList);
+
+        return success(treeData);
+    }
+
+    /**
+     * 构建树形数据结构：部门 -> 课程 -> 任务
+     */
+    private List<Map<String, Object>> buildTreeData(List<ExpTask> taskList)
+    {
+        List<Map<String, Object>> result = new ArrayList<>();
+
+        // 按部门分组
+        Map<String, List<ExpTask>> deptMap = new LinkedHashMap<>();
+        for (ExpTask task : taskList)
+        {
+            String deptKey = task.getDeptId() + "_" + task.getDeptName();
+            deptMap.computeIfAbsent(deptKey, k -> new ArrayList<>()).add(task);
+        }
+
+        // 构建部门级节点
+        for (Map.Entry<String, List<ExpTask>> deptEntry : deptMap.entrySet())
+        {
+            String deptKey = deptEntry.getKey();
+            List<ExpTask> deptTasks = deptEntry.getValue();
+
+            String[] parts = deptKey.split("_", 2);
+            Long deptId = Long.valueOf(parts[0]);
+            String deptName = parts[1];
+
+            // 获取带年级的部门名称
+            String deptNameWithGrade = getDeptNameWithGrade(deptId, deptName);
+
+            Map<String, Object> deptNode = new HashMap<>();
+            deptNode.put("id", "dept_" + deptId);
+            deptNode.put("type", "dept");
+            deptNode.put("deptId", deptId);
+            deptNode.put("deptName", deptName);
+            deptNode.put("name", deptNameWithGrade);
+
+            // 统计部门级数据
+            int deptTotalTasks = deptTasks.size();
+            int deptPendingCount = deptTasks.stream().mapToInt(t -> t.getPendingCount() != null ? t.getPendingCount() : 0).sum();
+            deptNode.put("totalTasks", deptTotalTasks);
+            deptNode.put("pendingCount", deptPendingCount);
+
+            // 按课程分组
+            Map<String, List<ExpTask>> courseMap = new LinkedHashMap<>();
+            for (ExpTask task : deptTasks)
+            {
+                courseMap.computeIfAbsent(task.getCourseName(), k -> new ArrayList<>()).add(task);
+            }
+
+            // 构建课程级节点
+            List<Map<String, Object>> courseNodes = new ArrayList<>();
+            for (Map.Entry<String, List<ExpTask>> courseEntry : courseMap.entrySet())
+            {
+                String courseName = courseEntry.getKey();
+                List<ExpTask> courseTasks = courseEntry.getValue();
+
+                Map<String, Object> courseNode = new HashMap<>();
+                courseNode.put("id", "course_" + deptId + "_" + courseName);
+                courseNode.put("type", "course");
+                courseNode.put("courseName", courseName);
+                courseNode.put("name", courseName);
+
+                // 统计课程级数据
+                int courseTotalTasks = courseTasks.size();
+                int coursePendingCount = courseTasks.stream().mapToInt(t -> t.getPendingCount() != null ? t.getPendingCount() : 0).sum();
+                courseNode.put("totalTasks", courseTotalTasks);
+                courseNode.put("pendingCount", coursePendingCount);
+
+                // 构建任务级节点
+                List<Map<String, Object>> taskNodes = new ArrayList<>();
+                for (ExpTask task : courseTasks)
+                {
+                    Map<String, Object> taskNode = new HashMap<>();
+                    taskNode.put("id", "task_" + task.getTaskId());
+                    taskNode.put("type", "task");
+                    taskNode.put("taskId", task.getTaskId());
+                    taskNode.put("taskName", task.getTaskName());
+                    taskNode.put("name", task.getTaskName());
+                    taskNode.put("courseName", task.getCourseName());
+                    taskNode.put("deptName", task.getDeptName());
+                    taskNode.put("createTime", task.getCreateTime());
+                    taskNode.put("deadline", task.getDeadline());
+                    taskNode.put("status", task.getStatus());
+                    taskNode.put("submitCount", task.getSubmitCount() != null ? task.getSubmitCount() : 0);
+                    taskNode.put("totalCount", task.getTotalCount() != null ? task.getTotalCount() : 0);
+                    taskNode.put("reviewedCount", task.getReviewedCount() != null ? task.getReviewedCount() : 0);
+                    taskNode.put("pendingCount", task.getPendingCount() != null ? task.getPendingCount() : 0);
+
+                    taskNodes.add(taskNode);
+                }
+
+                courseNode.put("children", taskNodes);
+                courseNodes.add(courseNode);
+            }
+
+            deptNode.put("children", courseNodes);
+            result.add(deptNode);
+        }
+
+        return result;
+    }
+
+    /**
+     * 获取带年级的部门名称
+     * 向上查找父级部门链，找到包含4位数字年份的"级"部门（如"2022级"）
+     *
+     * @param deptId 部门ID
+     * @param deptName 部门名称
+     * @return 带年级的部门名称（如"2022级软件工程5班"）
+     */
+    private String getDeptNameWithGrade(Long deptId, String deptName)
+    {
+        try
+        {
+            // 如果部门名称本身就包含年份（4位数字开头），直接返回
+            if (deptName.matches("^\\d{4}.*"))
+            {
+                return deptName;
+            }
+
+            // 查询当前部门信息
+            com.ruoyi.common.core.domain.entity.SysDept dept = deptService.selectDeptById(deptId);
+            if (dept == null || dept.getAncestors() == null)
+            {
+                return deptName;
+            }
+
+            // 解析祖级列表（格式："0,100,101,102"）
+            String[] ancestorIds = dept.getAncestors().split(",");
+
+            // 从最顶层开始查找包含年份的"级"部门
+            for (String ancestorIdStr : ancestorIds)
+            {
+                if ("0".equals(ancestorIdStr))
+                {
+                    continue; // 跳过根节点
+                }
+
+                Long ancestorId = Long.valueOf(ancestorIdStr);
+                com.ruoyi.common.core.domain.entity.SysDept ancestorDept = deptService.selectDeptById(ancestorId);
+
+                if (ancestorDept != null && ancestorDept.getDeptName() != null)
+                {
+                    String ancestorName = ancestorDept.getDeptName();
+                    // 匹配包含4位年份的部门名称（如"2022级"）
+                    java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("(\\d{4})级");
+                    java.util.regex.Matcher matcher = pattern.matcher(ancestorName);
+
+                    if (matcher.find())
+                    {
+                        // 找到年份，拼接到班级名称前面
+                        String year = matcher.group(1);
+                        return year + "级" + deptName;
+                    }
+                }
+            }
+
+            // 如果没有找到年级部门，返回原始名称
+            return deptName;
+        }
+        catch (Exception e)
+        {
+            logger.error("获取部门年级信息失败, deptId: {}, error: {}", deptId, e.getMessage());
+            return deptName;
+        }
+    }
+
     /**
      * 查询实验任务列表
      */
@@ -161,6 +355,16 @@ public class ExpTaskController extends BaseController
         startPage();
         List<ExpTask> list = expTaskService.selectExpTaskList(expTask);
 
+        // 格式化部门名称（添加年级信息）
+        for (ExpTask task : list)
+        {
+            if (task.getDeptId() != null && task.getDeptName() != null)
+            {
+                String formattedDeptName = getDeptNameWithGrade(task.getDeptId(), task.getDeptName());
+                task.setDeptName(formattedDeptName);
+            }
+        }
+
         // 如果是学生，查询每个任务的学生报告状态
         if (isStudent && currentUserId != null)
         {
@@ -179,18 +383,24 @@ public class ExpTaskController extends BaseController
 
                 if (submit != null)
                 {
-                    logger.info("  - 提交记录ID: {}, 状态: {}, 用户ID: {}, 用户名: {}",
+                    logger.info("  - 提交记录ID: {}, 状态: {}, 用户ID: {}, 用户名: {}, 分数: {}, 更新时间: {}",
                         submit.getSubmitId(),
                         submit.getStatus(),
                         submit.getUserId(),
-                        submit.getUserName());
+                        submit.getUserName(),
+                        submit.getScore(),
+                        submit.getUpdateTime());
                     task.setStudentSubmitStatus(submit.getStatus());
+                    task.setScore(submit.getScore());
+                    task.setReviewTime(submit.getUpdateTime());
                 }
                 else
                 {
                     logger.warn("  - 未找到提交记录！任务ID={}, 学生ID={}", task.getTaskId(), currentUserId);
                     // 未创建提交记录，状态为null（前端可显示为"未开始"）
                     task.setStudentSubmitStatus(null);
+                    task.setScore(null);
+                    task.setReviewTime(null);
                 }
             }
             logger.info("==========================================");
@@ -297,6 +507,7 @@ public class ExpTaskController extends BaseController
 
     /**
      * 新增实验任务
+     * 支持多选部门：如果提供了 deptIds，则为每个部门创建一个任务副本
      */
     @PreAuthorize("@ss.hasPermi('task:task:add')")
     @Log(title = "实验任务", businessType = BusinessType.INSERT)
@@ -304,7 +515,62 @@ public class ExpTaskController extends BaseController
     public AjaxResult add(@RequestBody ExpTask expTask)
     {
         expTask.setCreateBy(getUsername());
-        return toAjax(expTaskService.insertExpTask(expTask));
+
+        // 检查是否多选了部门
+        if (expTask.getDeptIds() != null && !expTask.getDeptIds().isEmpty())
+        {
+            logger.info("批量创建任务，部门数量: {}", expTask.getDeptIds().size());
+
+            int successCount = 0;
+
+            // 为每个部门创建任务副本
+            for (Long deptId : expTask.getDeptIds())
+            {
+                try
+                {
+                    // 创建任务副本
+                    ExpTask taskCopy = new ExpTask();
+                    taskCopy.setTaskName(expTask.getTaskName());
+                    taskCopy.setCourseName(expTask.getCourseName());
+                    taskCopy.setDeptId(deptId);
+                    taskCopy.setDeadline(expTask.getDeadline());
+                    taskCopy.setStatus(expTask.getStatus());
+                    taskCopy.setReportFileUrl(expTask.getReportFileUrl());
+                    taskCopy.setAcademicTerm(expTask.getAcademicTerm());
+                    taskCopy.setRemark(expTask.getRemark());
+                    taskCopy.setCreateBy(getUsername());
+
+                    // 保存任务
+                    int result = expTaskService.insertExpTask(taskCopy);
+                    if (result > 0)
+                    {
+                        successCount++;
+                    }
+                }
+                catch (Exception e)
+                {
+                    logger.error("为部门 {} 创建任务失败", deptId, e);
+                }
+            }
+
+            if (successCount == expTask.getDeptIds().size())
+            {
+                return AjaxResult.success(String.format("成功为 %d 个部门创建任务", successCount));
+            }
+            else if (successCount > 0)
+            {
+                return AjaxResult.success(String.format("成功为 %d/%d 个部门创建任务", successCount, expTask.getDeptIds().size()));
+            }
+            else
+            {
+                return AjaxResult.error("创建任务失败");
+            }
+        }
+        else
+        {
+            // 单个部门的情况（向后兼容）
+            return toAjax(expTaskService.insertExpTask(expTask));
+        }
     }
 
     /**
@@ -483,6 +749,27 @@ public class ExpTaskController extends BaseController
             ExpTaskSubmit existSubmit = expTaskSubmitService.selectExpTaskSubmitByTaskIdAndUserId(taskId, userId);
             if (existSubmit != null && com.ruoyi.common.utils.StringUtils.isNotEmpty(existSubmit.getFileUrl()))
             {
+                // ✅ 如果报告被打回（状态4），强制生成新的documentKey以避免版本冲突
+                if ("4".equals(existSubmit.getStatus())) {
+                    Integer currentVersion = existSubmit.getDocumentVersion() != null ? existSubmit.getDocumentVersion() : 1;
+                    Integer newVersion = currentVersion + 1;
+                    String newDocumentKey = DigestUtils.sha256Hex("task_" + taskId + "_user_" + userId + "_v" + newVersion + "_" + System.currentTimeMillis());
+
+                    // 更新documentKey和版本号
+                    existSubmit.setDocumentKey(newDocumentKey);
+                    existSubmit.setDocumentVersion(newVersion);
+                    expTaskSubmitService.updateExpTaskSubmit(existSubmit);
+
+                    logger.info("打回报告重新打开，强制更新documentKey, taskId: {}, userId: {}, version: {} -> {}, newKey: {}",
+                        taskId, userId, currentVersion, newVersion, newDocumentKey);
+
+                    AjaxResult result = success(existSubmit.getFileUrl());
+                    result.put("documentKey", newDocumentKey);
+                    result.put("documentVersion", newVersion);
+                    result.put("submitStatus", existSubmit.getStatus());
+                    return result;
+                }
+
                 // 已经创建过副本，返回文件URL和documentKey（使用数据库中最新的documentKey）
                 logger.info("学生已有副本文件, taskId: {}, userId: {}, fileUrl: {}, documentKey: {}, version: {}, status: {}",
                     taskId, userId, existSubmit.getFileUrl(), existSubmit.getDocumentKey(), existSubmit.getDocumentVersion(), existSubmit.getStatus());
@@ -1011,7 +1298,7 @@ public class ExpTaskController extends BaseController
     }
 
     /**
-     * 批量导出成绩（基于模板）
+     * 导出单个任务的成绩（基于模板）
      */
     @PreAuthorize("@ss.hasPermi('task:task:add')")
     @Log(title = "导出成绩", businessType = BusinessType.EXPORT)
@@ -1046,12 +1333,12 @@ public class ExpTaskController extends BaseController
     }
 
     /**
-     * 批量导出多个任务的成绩（基于模板）
+     * 横向汇总导出成绩(所有选中的实验在同一个Sheet中,每个实验占一列,只导出成绩不导出评语)
      */
     @PreAuthorize("@ss.hasPermi('task:task:add')")
-    @Log(title = "批量导出成绩", businessType = BusinessType.EXPORT)
-    @PostMapping("/submit/batchExport")
-    public void batchExportGrades(@RequestParam String taskIds, HttpServletResponse response)
+    @Log(title = "横向汇总导出成绩", businessType = BusinessType.EXPORT)
+    @PostMapping("/submit/horizontalSummaryExport")
+    public void horizontalSummaryExport(@RequestParam String taskIds, HttpServletResponse response)
     {
         try
         {
@@ -1079,7 +1366,7 @@ public class ExpTaskController extends BaseController
             Long deptId = tasks.get(0).getDeptId();
             for (ExpTask task : tasks) {
                 if (!task.getDeptId().equals(deptId)) {
-                    throw new RuntimeException("只能导出同一部门的任务成绩");
+                    throw new RuntimeException("只能导出同一班级的任务成绩");
                 }
             }
 
@@ -1091,7 +1378,7 @@ public class ExpTaskController extends BaseController
                 }
             }
 
-            // 5. 获取每个任务的学生提交记录
+            // 5. 获取该部门的学生提交记录
             Map<Long, List<ExpTaskSubmit>> submitListMap = new java.util.HashMap<>();
             for (ExpTask task : tasks) {
                 ExpTaskSubmit querySubmit = new ExpTaskSubmit();
@@ -1101,16 +1388,19 @@ public class ExpTaskController extends BaseController
                 submitListMap.put(task.getTaskId(), list);
             }
 
-            // 6. 使用模板导出服务批量导出成绩
-            excelTemplateExportService.batchExportGradesByTemplate(tasks, submitListMap, response);
+            logger.info("横向汇总导出：班级={}, 课程={}, 任务数={}",
+                tasks.get(0).getDeptName(), courseName, tasks.size());
+
+            // 6. 使用模板导出服务横向汇总导出成绩
+            excelTemplateExportService.horizontalSummaryExport(tasks, submitListMap, response);
         }
         catch (Exception e)
         {
-            logger.error("批量导出成绩失败", e);
+            logger.error("横向汇总导出成绩失败", e);
             try {
                 response.setContentType("application/json");
                 response.setCharacterEncoding("utf-8");
-                response.getWriter().write("{\"msg\":\"批量导出成绩失败：" + e.getMessage() + "\",\"code\":500}");
+                response.getWriter().write("{\"msg\":\"横向汇总导出成绩失败：" + e.getMessage() + "\",\"code\":500}");
             } catch (IOException ioException) {
                 logger.error("写入错误响应失败", ioException);
             }

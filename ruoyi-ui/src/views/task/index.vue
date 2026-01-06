@@ -95,6 +95,11 @@
             </div>
           </template>
         </el-table-column>
+        <el-table-column label="班级" prop="deptName" :show-overflow-tooltip="true" width="160">
+          <template slot-scope="scope">
+            <span>{{ formatDeptName(scope.row.deptName) }}</span>
+          </template>
+        </el-table-column>
         <el-table-column label="课程" prop="courseName" :show-overflow-tooltip="true" width="120" />
         <el-table-column label="发布时间" align="center" prop="createTime" width="105">
           <template slot-scope="scope">
@@ -106,7 +111,7 @@
             <span>{{ parseTime(scope.row.deadline, '{m}-{d} {h}:{i}') }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="提交情况" align="center" width="120">
+        <el-table-column v-if="isTeacher" label="提交情况" align="center" width="120">
           <template slot-scope="scope">
             <div class="submit-info">
               <el-progress
@@ -148,20 +153,36 @@
             >查看</el-button>
             <!-- 学生端：查看批改结果（仅已批阅状态显示） -->
             <el-button
-              v-if="!isTeacher && scope.row.studentSubmitStatus === '3'"
+              v-if="!isTeacher && (scope.row.studentSubmitStatus === '3' || scope.row.studentSubmitStatus === '6')"
               size="mini"
               type="success"
               icon="el-icon-star-on"
               @click="handleViewGrade(scope.row)"
             >查看成绩</el-button>
-            <!-- 学生端：在线完成 -->
+            <!-- 学生端：在线完成（未开始、草稿、已打回状态） -->
             <el-button
-              v-if="!isTeacher && scope.row.status === '1'"
+              v-if="!isTeacher && scope.row.status === '1' && (!scope.row.studentSubmitStatus || scope.row.studentSubmitStatus === '0' || scope.row.studentSubmitStatus === '4')"
               size="mini"
               type="success"
               icon="el-icon-edit-outline"
               @click="handleOnlineComplete(scope.row)"
             >在线完成</el-button>
+            <!-- 学生端：预览报告（已提交、批阅中、已批阅、重新提交状态） -->
+            <el-button
+              v-if="!isTeacher && ['1', '2', '3', '5', '6'].includes(scope.row.studentSubmitStatus)"
+              size="mini"
+              type="primary"
+              icon="el-icon-view"
+              @click="handlePreviewReport(scope.row)"
+            >预览报告</el-button>
+            <!-- 学生端：查看打回原因（仅已打回状态显示） -->
+            <el-button
+              v-if="!isTeacher && scope.row.studentSubmitStatus === '4'"
+              size="mini"
+              type="warning"
+              icon="el-icon-warning"
+              @click="handleViewRejectReason(scope.row)"
+            >打回原因</el-button>
             <el-button
               v-if="scope.row.status !== '2'"
               size="mini"
@@ -213,8 +234,19 @@
         <el-form-item label="课程名称" prop="courseName">
           <el-input v-model="form.courseName" placeholder="请输入课程名称" />
         </el-form-item>
-        <el-form-item label="发布部门" prop="deptId">
-          <treeselect v-model="form.deptId" :options="deptOptions" :show-count="true" placeholder="请选择发布部门" />
+        <el-form-item label="发布部门" prop="deptIds">
+          <treeselect
+            v-model="form.deptIds"
+            :options="deptOptions"
+            :show-count="true"
+            :multiple="true"
+            :flat="true"
+            :disabled="form.taskId != undefined"
+            :disableBranchNodes="true"
+            placeholder="请选择发布部门（只能选择班级）"
+          />
+          <span class="form-tip" v-if="form.taskId == undefined">只能选择班级（最后一级部门），可以同时选择多个班级</span>
+          <span class="form-tip" v-else style="color: #E6A23C;">编辑任务时不能修改发布部门</span>
         </el-form-item>
         <el-form-item label="截止时间" prop="deadline">
           <el-date-picker
@@ -224,6 +256,12 @@
             value-format="yyyy-MM-dd HH:mm:ss"
             style="width: 100%"
           />
+        </el-form-item>
+        <el-form-item label="学年学期" prop="academicTerm">
+          <el-input v-model="form.academicTerm" placeholder="自动生成学年学期" readonly>
+            <el-button slot="append" icon="el-icon-refresh" @click="generateAcademicTerm">生成</el-button>
+          </el-input>
+          <span class="form-tip">点击"生成"按钮自动生成当前学年学期</span>
         </el-form-item>
         <el-form-item label="实验报告">
           <file-upload v-model="form.reportFileUrl" :limit="1" :fileSize="10" :fileType="['doc', 'docx', 'pdf', 'txt']" action="/Task/upload" />
@@ -243,6 +281,7 @@
       <el-descriptions :column="1" border>
         <el-descriptions-item label="任务名称">{{ viewForm.taskName }}</el-descriptions-item>
         <el-descriptions-item label="课程名称">{{ viewForm.courseName }}</el-descriptions-item>
+        <el-descriptions-item label="学年学期">{{ viewForm.academicTerm || '未设置' }}</el-descriptions-item>
         <el-descriptions-item label="发布部门">{{ viewForm.deptName }}</el-descriptions-item>
         <el-descriptions-item label="发布时间">{{ parseTime(viewForm.createTime, '{y}-{m}-{d} {h}:{i}:{s}') }}</el-descriptions-item>
         <el-descriptions-item label="截止时间">{{ parseTime(viewForm.deadline, '{y}-{m}-{d} {h}:{i}:{s}') }}</el-descriptions-item>
@@ -316,6 +355,33 @@
         <el-button type="primary" @click="gradeOpen = false">关 闭</el-button>
       </div>
     </el-dialog>
+
+    <!-- 学生端：查看打回原因对话框 -->
+    <el-dialog title="打回原因" :visible.sync="rejectReasonOpen" width="600px" append-to-body>
+      <el-card shadow="hover" class="reject-card">
+        <div class="reject-header">
+          <i class="el-icon-warning reject-icon"></i>
+          <span class="reject-label">教师反馈</span>
+        </div>
+        <div v-if="rejectReasonForm.rejectReason" class="reject-content">
+          {{ rejectReasonForm.rejectReason }}
+        </div>
+        <div v-else class="reject-content empty">
+          教师未填写打回原因
+        </div>
+      </el-card>
+      <el-alert
+        title="请根据教师反馈修改您的报告后重新提交"
+        type="warning"
+        :closable="false"
+        show-icon
+        style="margin-top: 20px;">
+      </el-alert>
+      <div slot="footer" class="dialog-footer">
+        <el-button type="warning" @click="handleOnlineCompleteFromReject">立即修改</el-button>
+        <el-button @click="rejectReasonOpen = false">关 闭</el-button>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
@@ -349,6 +415,8 @@ export default {
       viewOpen: false,
       // 是否显示查看成绩弹出层
       gradeOpen: false,
+      // 是否显示打回原因弹出层
+      rejectReasonOpen: false,
       // 部门树选项
       deptOptions: undefined,
       // 查询参数
@@ -363,6 +431,10 @@ export default {
       viewForm: {},
       // 查看成绩表单
       gradeForm: {},
+      // 查看打回原因表单
+      rejectReasonForm: {},
+      // 当前打回任务（用于立即修改）
+      currentRejectTask: null,
       // 学生端：当前选中的状态标签
       activeStatusTab: 'all',
       // 学生端：各状态的任务数量
@@ -389,8 +461,14 @@ export default {
         courseName: [
           { required: true, message: "课程名称不能为空", trigger: "blur" }
         ],
-        deptId: [
-          { required: true, message: "发布部门不能为空", trigger: "change" }
+        deptIds: [
+          {
+            required: true,
+            type: 'array',
+            min: 1,
+            message: "请至少选择一个发布部门",
+            trigger: "change"
+          }
         ],
         deadline: [
           { required: true, message: "截止时间不能为空", trigger: "change" }
@@ -539,8 +617,9 @@ export default {
         taskId: undefined,
         taskName: undefined,
         courseName: undefined,
-        deptId: undefined,
+        deptIds: [],
         deadline: undefined,
+        academicTerm: undefined,
         status: "0",
         remark: undefined,
         reportFileUrl: undefined
@@ -563,6 +642,37 @@ export default {
       this.getDeptTree() // 在打开新增对话框时加载部门树
       this.open = true
       this.title = "发布新任务"
+      // 自动生成当前学年学期
+      this.generateAcademicTerm()
+    },
+    /** 生成学年学期 */
+    generateAcademicTerm() {
+      const now = new Date()
+      const year = now.getFullYear()
+      const month = now.getMonth() + 1 // 0-11
+
+      let startYear, endYear, semester
+
+      if (month >= 2 && month <= 7) {
+        // 2月-7月：第二学期
+        startYear = year - 1
+        endYear = year
+        semester = '第二学期'
+      } else {
+        // 8月-12月或1月：第一学期
+        if (month >= 8) {
+          // 8月-12月
+          startYear = year
+          endYear = year + 1
+        } else {
+          // 1月
+          startYear = year - 1
+          endYear = year
+        }
+        semester = '第一学期'
+      }
+
+      this.form.academicTerm = `${startYear}-${endYear}学年${semester}`
     },
     /** 修改按钮操作 */
     handleUpdate(row) {
@@ -571,6 +681,10 @@ export default {
       const taskId = row.taskId || this.ids
       getTask(taskId).then(response => {
         this.form = response.data
+        // 编辑时：将单个 deptId 转换为数组格式
+        if (this.form.deptId) {
+          this.form.deptIds = [this.form.deptId]
+        }
         this.open = true
         this.title = "修改任务"
       })
@@ -589,6 +703,46 @@ export default {
         this.gradeOpen = true
       }).catch(err => {
         this.$modal.msgError("获取批改结果失败")
+      })
+    },
+    /** 学生端：查看打回原因 */
+    handleViewRejectReason(row) {
+      getMySubmitDetail(row.taskId).then(response => {
+        this.rejectReasonForm = response.data
+        this.currentRejectTask = row
+        this.rejectReasonOpen = true
+      }).catch(err => {
+        this.$modal.msgError("获取打回原因失败")
+      })
+    },
+    /** 学生端：从打回原因对话框立即修改 */
+    handleOnlineCompleteFromReject() {
+      this.rejectReasonOpen = false
+      if (this.currentRejectTask) {
+        this.handleOnlineComplete(this.currentRejectTask)
+      }
+    },
+    /** 学生端：预览报告 */
+    handlePreviewReport(row) {
+      // 获取学生提交的报告详情
+      getMySubmitDetail(row.taskId).then(response => {
+        const submit = response.data
+        if (!submit || !submit.fileUrl) {
+          this.$modal.msgWarning("暂无提交记录")
+          return
+        }
+        // 跳转到在线编辑页面，只读模式
+        this.$router.push({
+          path: '/task/edit',
+          query: {
+            taskId: row.taskId,
+            taskName: row.taskName,
+            fileUrl: submit.fileUrl,
+            readOnly: true
+          }
+        })
+      }).catch(() => {
+        this.$modal.msgError("获取提交记录失败")
       })
     },
     /** 下载实验报告 */
@@ -630,12 +784,20 @@ export default {
       this.$refs["form"].validate(valid => {
         if (valid) {
           if (this.form.taskId != undefined) {
-            updateTask(this.form).then(response => {
+            // 修改任务：将 deptIds 转回单个 deptId
+            const updateData = { ...this.form }
+            if (updateData.deptIds && updateData.deptIds.length > 0) {
+              updateData.deptId = updateData.deptIds[0]
+            }
+            delete updateData.deptIds
+
+            updateTask(updateData).then(response => {
               this.$modal.msgSuccess("修改成功")
               this.open = false
               this.getList()
             })
           } else {
+            // 新增任务：使用 deptIds 数组
             addTask(this.form).then(response => {
               this.$modal.msgSuccess("新增成功")
               this.open = false
@@ -685,6 +847,21 @@ export default {
     /** 获取报告状态标签类型 */
     getStateType(state) {
       return getStateType(state)
+    },
+    /** 格式化部门名称（添加"级"字，如果部门名称包含年份） */
+    formatDeptName(deptName) {
+      if (!deptName) return ''
+      // 如果已经包含"级"，直接返回
+      if (deptName.includes('级')) {
+        return deptName
+      }
+      // 匹配4位年份开头的部门名称（如"2022软件工程5班"），在年份后添加"级"
+      const yearMatch = deptName.match(/^(\d{4})(.+)/)
+      if (yearMatch) {
+        return yearMatch[1] + '级' + yearMatch[2]
+      }
+      // 如果没有年份，返回原始名称
+      return deptName
     }
   }
 }
@@ -935,6 +1112,51 @@ export default {
 .no-grade p {
   font-size: 16px;
   margin: 0;
+}
+
+/* 打回原因对话框样式 */
+.reject-card {
+  border-radius: 8px;
+}
+
+.reject-card ::v-deep .el-card__body {
+  padding: 25px;
+}
+
+.reject-header {
+  display: flex;
+  align-items: center;
+  margin-bottom: 15px;
+  font-size: 16px;
+  font-weight: 500;
+  color: #303133;
+}
+
+.reject-icon {
+  font-size: 22px;
+  margin-right: 8px;
+  color: #E6A23C;
+}
+
+.reject-content {
+  font-size: 15px;
+  line-height: 1.8;
+  color: #606266;
+  background: #FEF0F0;
+  padding: 20px;
+  border-radius: 6px;
+  border-left: 4px solid #F56C6C;
+  white-space: pre-wrap;
+  word-break: break-word;
+  min-height: 80px;
+}
+
+.reject-content.empty {
+  color: #909399;
+  font-style: italic;
+  text-align: center;
+  background: #f5f7fa;
+  border-left-color: #909399;
 }
 </style>
 

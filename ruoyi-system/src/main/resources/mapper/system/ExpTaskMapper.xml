@@ -17,6 +17,7 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         <result property="updateTime"    column="update_time"    />
         <result property="remark"    column="remark"    />
         <result property="reportFileUrl"    column="report_file_url"    />
+        <result property="academicTerm"    column="academic_term"    />
         <result property="deptName"    column="dept_name"    />
         <result property="submitCount"    column="submit_count"    />
         <result property="totalCount"    column="total_count"    />
@@ -25,7 +26,13 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
     </resultMap>
 
     <sql id="selectExpTaskVo">
-        select t.task_id, t.task_name, t.course_name, t.dept_id, t.deadline, t.status, t.create_by, t.create_time, t.update_by, t.update_time, t.remark, t.report_file_url,
+        select t.task_id, t.task_name, t.course_name, t.dept_id, t.deadline,
+               CASE
+                   WHEN NOW() &lt; t.deadline THEN '1'
+                   WHEN NOW() &gt;= t.deadline THEN '2'
+                   ELSE t.status
+               END as status,
+               t.create_by, t.create_time, t.update_by, t.update_time, t.remark, t.report_file_url, t.academic_term,
                d.dept_name,
                (SELECT COUNT(*) FROM exp_task_submit WHERE task_id = t.task_id AND status IN ('1', '2', '3', '5', '6')) as submit_count,
                (SELECT COUNT(*) FROM sys_user WHERE dept_id = t.dept_id AND del_flag = '0') as total_count,
@@ -70,6 +77,7 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
             <if test="createBy != null and createBy != ''">create_by,</if>
             <if test="remark != null">remark,</if>
             <if test="reportFileUrl != null">report_file_url,</if>
+            <if test="academicTerm != null and academicTerm != ''">academic_term,</if>
             create_time
          </trim>
         <trim prefix="values (" suffix=")" suffixOverrides=",">
@@ -81,6 +89,7 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
             <if test="createBy != null and createBy != ''">#{createBy},</if>
             <if test="remark != null">#{remark},</if>
             <if test="reportFileUrl != null">#{reportFileUrl},</if>
+            <if test="academicTerm != null and academicTerm != ''">#{academicTerm},</if>
             sysdate()
          </trim>
     </insert>
@@ -96,6 +105,7 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
             <if test="updateBy != null and updateBy != ''">update_by = #{updateBy},</if>
             <if test="remark != null">remark = #{remark},</if>
             <if test="reportFileUrl != null">report_file_url = #{reportFileUrl},</if>
+            <if test="academicTerm != null and academicTerm != ''">academic_term = #{academicTerm},</if>
             update_time = sysdate()
         </trim>
         where task_id = #{taskId}

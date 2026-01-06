@@ -60,6 +60,12 @@ export default {
     this.taskName = this.$route.query.taskName || ''
     this.templateUrl = this.$route.query.fileUrl || ''
 
+    // 检查是否为只读模式（从query参数获取）
+    if (this.$route.query.readOnly === 'true' || this.$route.query.readOnly === true) {
+      this.isReadOnly = true
+      console.log('🔒 通过URL参数设置为只读模式')
+    }
+
     if (!this.taskId) {
       this.$modal.msgError("任务ID不能为空")
       this.$router.go(-1)
@@ -93,6 +99,17 @@ export default {
     createCopyAndInitEditor() {
       this.loading = true
       this.error = null
+
+      // 如果是只读模式且已经有fileUrl，直接初始化编辑器
+      if (this.isReadOnly && this.templateUrl) {
+        console.log('=== 只读模式：直接使用已提交的文件 ===')
+        console.log('fileUrl:', this.templateUrl)
+        this.fileUrl = this.templateUrl
+        // 只读模式不需要documentKey，因为不会保存
+        this.documentKey = 'readonly-' + Date.now()
+        this.initEditor()
+        return
+      }
 
       console.log('=== 开始创建实验报告副本 ===')
       console.log('taskId:', this.taskId)

@@ -9,7 +9,12 @@
       "Bash(npm run dev:*)",
       "Bash(tee:*)",
       "Bash(echo:*)",
-      "Bash(dir:*)"
+      "Bash(dir:*)",
+      "Bash(javac:*)",
+      "Bash(java:*)",
+      "Bash(python read_template.py:*)",
+      "Bash(pip install:*)",
+      "Bash(del read_template.py)"
     ]
   }
 }

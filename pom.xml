@@ -4,16 +4,16 @@
          xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
 	<modelVersion>4.0.0</modelVersion>
 	
-    <groupId>com.ruoyi</groupId>
-    <artifactId>ruoyi</artifactId>
-    <version>3.9.1</version>
+    <groupId>com.gcu</groupId>
+    <artifactId>lab-report-system</artifactId>
+    <version>1.0.0</version>
 
-    <name>ruoyi</name>
-    <url>http://www.ruoyi.vip</url>
-    <description>若依管理系统</description>
-    
+    <name>广州城市理工学院实验报告管理系统</name>
+    <url>https://www.gcu.edu.cn</url>
+    <description>广州城市理工学院实验报告管理系统</description>
+
     <properties>
-        <ruoyi.version>3.9.1</ruoyi.version>
+        <ruoyi.version>1.0.0</ruoyi.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
         <java.version>1.8</java.version>
