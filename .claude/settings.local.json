@@ -14,7 +14,9 @@
       "Bash(java:*)",
       "Bash(python read_template.py:*)",
       "Bash(pip install:*)",
-      "Bash(del read_template.py)"
+      "Bash(del read_template.py)",
+      "Bash(find:*)",
+      "Bash(npm run build:prod:*)"
     ]
   }
 }

@@ -70,7 +70,14 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
         WHERE u.del_flag = '0'
         AND u.dept_id = #{deptId}
         <if test="status != null and status != ''">
-            AND s.status = #{status}
+            <choose>
+                <when test="status == 'unsubmit'">
+                    AND s.submit_time IS NULL
+                </when>
+                <otherwise>
+                    AND s.status = #{status}
+                </otherwise>
+            </choose>
         </if>
         <if test="userName != null and userName != ''">
             AND u.user_name like concat('%', #{userName}, '%')
@@ -82,6 +89,55 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
             END,
             s.submit_time DESC,
             u.user_name ASC
+    </select>
+
+    <select id="selectExpTaskSubmitListWithAllStudentsCount" parameterType="ExpTaskSubmit" resultType="long">
+        SELECT COUNT(1)
+        FROM sys_user u
+        WHERE u.del_flag = '0'
+        AND u.dept_id = #{deptId}
+        <if test="userName != null and userName != ''">
+            AND u.user_name like concat('%', #{userName}, '%')
+        </if>
+        <if test="status != null and status != ''">
+            <choose>
+                <when test="status == 'unsubmit'">
+                    AND NOT EXISTS (
+                        SELECT 1
+                        FROM exp_task_submit s
+                        WHERE s.user_id = u.user_id
+                        AND s.task_id = #{taskId}
+                        AND s.submit_time IS NOT NULL
+                    )
+                </when>
+                <otherwise>
+                    AND EXISTS (
+                        SELECT 1
+                        FROM exp_task_submit s
+                        WHERE s.user_id = u.user_id
+                        AND s.task_id = #{taskId}
+                        AND s.status = #{status}
+                    )
+                </otherwise>
+            </choose>
+        </if>
+    </select>
+
+    <select id="selectExpTaskSubmitStatsWithAllStudents" parameterType="ExpTaskSubmit" resultType="map">
+        SELECT
+            COUNT(1) AS total,
+            SUM(CASE WHEN s.submit_time IS NOT NULL THEN 1 ELSE 0 END) AS submitted,
+            SUM(CASE WHEN s.submit_time IS NOT NULL AND s.status IN ('1','2','5') THEN 1 ELSE 0 END) AS pending,
+            SUM(CASE WHEN s.submit_time IS NOT NULL AND s.status IN ('3','6') THEN 1 ELSE 0 END) AS reviewed,
+            SUM(CASE WHEN s.submit_time IS NULL THEN 1 ELSE 0 END) AS unsubmitted,
+            AVG(CASE WHEN s.score IS NOT NULL THEN s.score ELSE NULL END) AS avgScore
+        FROM sys_user u
+        LEFT JOIN exp_task_submit s ON u.user_id = s.user_id AND s.task_id = #{taskId}
+        WHERE u.del_flag = '0'
+        AND u.dept_id = #{deptId}
+        <if test="userName != null and userName != ''">
+            AND u.user_name like concat('%', #{userName}, '%')
+        </if>
     </select>
 
     <select id="selectExpTaskSubmitBySubmitId" parameterType="Long" resultMap="ExpTaskSubmitResult">

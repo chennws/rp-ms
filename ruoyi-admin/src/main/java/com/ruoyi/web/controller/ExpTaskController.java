@@ -51,14 +51,19 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.multipart.MultipartFile;
 
+import com.github.pagehelper.PageHelper;
 import com.ruoyi.common.annotation.Anonymous;
 import com.ruoyi.common.annotation.Log;
+import com.ruoyi.common.constant.HttpStatus;
 import com.ruoyi.common.core.controller.BaseController;
 import com.ruoyi.common.core.domain.AjaxResult;
 import com.ruoyi.common.core.domain.model.LoginUser;
+import com.ruoyi.common.core.page.PageDomain;
 import com.ruoyi.common.core.page.TableDataInfo;
+import com.ruoyi.common.core.page.TableSupport;
 import com.ruoyi.common.enums.BusinessType;
 import com.ruoyi.common.utils.SecurityUtils;
+import com.ruoyi.common.utils.DateUtils;
 import com.ruoyi.common.utils.poi.ExcelUtil;
 import com.ruoyi.system.domain.ExpTask;
 import com.ruoyi.system.domain.ExpTaskSubmit;
@@ -355,15 +360,7 @@ public class ExpTaskController extends BaseController
         startPage();
         List<ExpTask> list = expTaskService.selectExpTaskList(expTask);
 
-        // 格式化部门名称（添加年级信息）
-        for (ExpTask task : list)
-        {
-            if (task.getDeptId() != null && task.getDeptName() != null)
-            {
-                String formattedDeptName = getDeptNameWithGrade(task.getDeptId(), task.getDeptName());
-                task.setDeptName(formattedDeptName);
-            }
-        }
+        // 注意：部门名称已经在SQL查询中通过 dept_display_name 表获取，无需再次格式化
 
         // 如果是学生，查询每个任务的学生报告状态
         if (isStudent && currentUserId != null)
@@ -601,7 +598,10 @@ public class ExpTaskController extends BaseController
      */
     @PreAuthorize("@ss.hasPermi('task:task:add')")
     @PostMapping("/upload")
-    public AjaxResult uploadFile(@RequestParam("file") MultipartFile file)
+    public AjaxResult uploadFile(@RequestParam("file") MultipartFile file,
+                                 @RequestParam(value = "taskName", required = false) String taskName,
+                                 @RequestParam(value = "courseName", required = false) String courseName,
+                                 @RequestParam(value = "deptId", required = false) Long deptId)
     {
         try
         {
@@ -609,11 +609,13 @@ public class ExpTaskController extends BaseController
             {
                 return error("上传文件不能为空");
             }
-            String objectName = minioUtil.upload(file);
-            if (objectName != null)
+            LoginUser loginUser = getLoginUser();
+            String objectName = buildTeacherTemplateObjectName(file, loginUser, taskName, courseName, deptId);
+            String storedObjectName = minioUtil.upload(file, objectName);
+            if (storedObjectName != null)
             {
                 // 构建完整的访问URL
-                String url = minioConfig.getEndpoint() + "/" + minioConfig.getBucketName() + "/" + objectName;
+                String url = minioConfig.getEndpoint() + "/" + minioConfig.getBucketName() + "/" + storedObjectName;
                 AjaxResult ajax = AjaxResult.success("文件上传成功");
                 // FileUpload组件使用fileName作为URL
                 ajax.put("fileName", url);
@@ -626,6 +628,42 @@ public class ExpTaskController extends BaseController
         catch (Exception e)
         {
             logger.error("文件上传失败", e);
+            return error("文件上传失败：" + e.getMessage());
+        }
+    }
+
+    /**
+     * 学生附件上传
+     */
+    @PreAuthorize("@ss.hasPermi('task:task:query')")
+    @PostMapping("/upload/student")
+    public AjaxResult uploadStudentFile(@RequestParam("file") MultipartFile file,
+                                        @RequestParam(value = "taskId", required = false) Long taskId)
+    {
+        try
+        {
+            if (file == null || file.isEmpty())
+            {
+                return error("上传文件不能为空");
+            }
+            LoginUser loginUser = getLoginUser();
+            ExpTask task = taskId != null ? expTaskService.selectExpTaskByTaskId(taskId) : null;
+            String objectName = buildStudentAttachmentObjectName(file, loginUser, task);
+            String storedObjectName = minioUtil.upload(file, objectName);
+            if (storedObjectName != null)
+            {
+                String url = minioConfig.getEndpoint() + "/" + minioConfig.getBucketName() + "/" + storedObjectName;
+                AjaxResult ajax = AjaxResult.success("文件上传成功");
+                ajax.put("fileName", url);
+                ajax.put("url", url);
+                ajax.put("originalFilename", file.getOriginalFilename());
+                return ajax;
+            }
+            return error("文件上传失败");
+        }
+        catch (Exception e)
+        {
+            logger.error("学生附件上传失败", e);
             return error("文件上传失败：" + e.getMessage());
         }
     }
@@ -1017,6 +1055,146 @@ public class ExpTaskController extends BaseController
     }
 
     /**
+     * 学生上传附件提交
+     */
+    @PreAuthorize("@ss.hasPermi('task:task:query')")
+    @Log(title = "上传附件提交任务", businessType = BusinessType.UPDATE)
+    @PostMapping("/submit/upload")
+    public AjaxResult submitTaskWithAttachment(@RequestBody Map<String, Object> params)
+    {
+        try
+        {
+            Long taskId = Long.valueOf(params.get("taskId").toString());
+            String fileUrl = params.get("fileUrl") != null ? params.get("fileUrl").toString() : null;
+
+            if (fileUrl == null || fileUrl.isEmpty())
+            {
+                return error("文件URL不能为空");
+            }
+
+            LoginUser loginUser = getLoginUser();
+            Long userId = loginUser.getUserId();
+
+            logger.info("学生上传附件提交任务, taskId: {}, userId: {}, fileUrl: {}", taskId, userId, fileUrl);
+
+            ExpTaskSubmit submit = expTaskSubmitService.selectExpTaskSubmitByTaskIdAndUserId(taskId, userId);
+            if (submit == null)
+            {
+                submit = new ExpTaskSubmit();
+                submit.setTaskId(taskId);
+                submit.setUserId(userId);
+                submit.setUserName(loginUser.getUsername());
+                submit.setStatus("0"); // 草稿
+                expTaskSubmitService.insertExpTaskSubmit(submit);
+            }
+
+            submit.setFileUrl(fileUrl);
+            submit.setDocumentKey(null);
+            submit.setDocumentVersion(null);
+            submit.setSubmitTime(new Date());
+            submit.setSubmitPending(0);
+            int updateResult = expTaskSubmitService.updateExpTaskSubmit(submit);
+
+            if (updateResult > 0)
+            {
+                String currentStatus = submit.getStatus() != null ? submit.getStatus() : "0";
+                if ("0".equals(currentStatus))
+                {
+                    reportStateMachineService.submitReport(submit.getSubmitId());
+                }
+                else if ("4".equals(currentStatus))
+                {
+                    reportStateMachineService.resubmit(submit.getSubmitId());
+                }
+                return success("提交成功");
+            }
+
+            return error("提交失败");
+        }
+        catch (Exception e)
+        {
+            logger.error("附件提交失败", e);
+            return error("提交失败：" + e.getMessage());
+        }
+    }
+
+    private String buildStudentAttachmentObjectName(MultipartFile file, LoginUser loginUser, ExpTask task)
+    {
+        String originalFilename = file.getOriginalFilename();
+        String extension = "";
+        if (originalFilename != null && originalFilename.contains("."))
+        {
+            extension = originalFilename.substring(originalFilename.lastIndexOf("."));
+        }
+
+        String studentName = loginUser != null && loginUser.getUser() != null
+            ? StringUtils.defaultIfBlank(loginUser.getUser().getNickName(), loginUser.getUsername())
+            : "student";
+        String studentNo = loginUser != null ? loginUser.getUsername() : "unknown";
+        String className = task != null ? task.getDeptName() : "class";
+        String courseName = task != null ? task.getCourseName() : "course";
+        String taskName = task != null ? task.getTaskName() : "task";
+        String timestamp = DateUtils.dateTimeNow("yyyyMMddHHmmss");
+
+        String safeStudentName = sanitizeObjectNameSegment(studentName);
+        String safeStudentNo = sanitizeObjectNameSegment(studentNo);
+        String safeClassName = sanitizeObjectNameSegment(className);
+        String safeCourseName = sanitizeObjectNameSegment(courseName);
+        String safeTaskName = sanitizeObjectNameSegment(taskName);
+
+        String fileName = safeStudentName + "_" + safeStudentNo + "_" + safeCourseName + "_" + safeTaskName + "_" + timestamp + extension;
+        return "student/" + safeClassName + "/" + safeCourseName + "/" + safeTaskName + "/" + fileName;
+    }
+
+    private String sanitizeObjectNameSegment(String value)
+    {
+        if (value == null)
+        {
+            return "unknown";
+        }
+        String normalized = value.trim();
+        if (normalized.isEmpty())
+        {
+            return "unknown";
+        }
+        return normalized.replaceAll("[\\\\/:*?\"<>|\\s]+", "_");
+    }
+
+    private String buildTeacherTemplateObjectName(MultipartFile file, LoginUser loginUser, String taskName, String courseName, Long deptId)
+    {
+        String originalFilename = file.getOriginalFilename();
+        String extension = "";
+        if (originalFilename != null && originalFilename.contains("."))
+        {
+            extension = originalFilename.substring(originalFilename.lastIndexOf("."));
+        }
+
+        String teacherName = loginUser != null && loginUser.getUser() != null
+            ? StringUtils.defaultIfBlank(loginUser.getUser().getNickName(), loginUser.getUsername())
+            : "teacher";
+        String teacherNo = loginUser != null ? loginUser.getUsername() : "unknown";
+
+        String className = "class";
+        if (deptId != null)
+        {
+            com.ruoyi.common.core.domain.entity.SysDept dept = deptService.selectDeptById(deptId);
+            if (dept != null && StringUtils.isNotBlank(dept.getDeptName()))
+            {
+                className = dept.getDeptName();
+            }
+        }
+
+        String safeTeacher = sanitizeObjectNameSegment(teacherName + "-" + teacherNo);
+        String safeClass = sanitizeObjectNameSegment(className);
+        String safeCourse = sanitizeObjectNameSegment(StringUtils.defaultIfBlank(courseName, "course"));
+        String safeTask = sanitizeObjectNameSegment(StringUtils.defaultIfBlank(taskName, "task"));
+        String timestamp = DateUtils.dateTimeNow("yyyyMMddHHmmss");
+
+        String fileName = safeTask + "_报告模版_" + timestamp + extension;
+        return "teacher/" + safeTeacher + "/" + safeClass + "/" + safeCourse + "/" + fileName;
+    }
+
+    /**
      * 检查任务提交状态
      * 前端轮询此接口，检查callback是否已成功保存文件到MinIO
      */
@@ -1141,19 +1319,73 @@ public class ExpTaskController extends BaseController
             logger.info("查询批改列表, taskId: {}, deptId: {}", taskId, deptId);
 
             // 2. 查询该部门下的所有学生及其提交情况
-            startPage();
+            PageDomain pageDomain = TableSupport.buildPageRequest();
+            PageHelper.startPage(pageDomain.getPageNum(), pageDomain.getPageSize(), false);
             expTaskSubmit.setTaskId(taskId);
             expTaskSubmit.setDeptId(deptId); // ✅ 设置部门ID
             List<ExpTaskSubmit> list = expTaskSubmitService.selectExpTaskSubmitListWithAllStudents(expTaskSubmit);
+            long total = expTaskSubmitService.selectExpTaskSubmitListWithAllStudentsCount(expTaskSubmit);
 
             logger.info("查询到{}条记录（包括未提交的学生）", list.size());
 
-            return getDataTable(list);
+            TableDataInfo rspData = new TableDataInfo(list, total);
+            rspData.setCode(HttpStatus.SUCCESS);
+            rspData.setMsg("查询成功");
+            return rspData;
         }
         catch (Exception e)
         {
             logger.error("获取提交列表失败", e);
             return getDataTable(new java.util.ArrayList<>());
+        }
+    }
+
+    /**
+     * 获取任务提交统计信息（教师批改用）
+     */
+    @PreAuthorize("@ss.hasPermi('task:task:add')")
+    @GetMapping("/submit/stats/{taskId}")
+    public AjaxResult getSubmitStats(@PathVariable Long taskId, @RequestParam(required = false) String keyword)
+    {
+        try
+        {
+            ExpTask task = expTaskService.selectExpTaskByTaskId(taskId);
+            if (task == null)
+            {
+                logger.error("任务不存在, taskId: {}", taskId);
+                return error("任务不存在");
+            }
+
+            Long deptId = task.getDeptId();
+            if (deptId == null)
+            {
+                logger.error("任务没有关联部门, taskId: {}", taskId);
+                return error("任务没有关联部门");
+            }
+
+            ExpTaskSubmit query = new ExpTaskSubmit();
+            query.setTaskId(taskId);
+            query.setDeptId(deptId);
+            if (StringUtils.isNotBlank(keyword))
+            {
+                query.setUserName(keyword);
+            }
+
+            Map<String, Object> stats = expTaskSubmitService.selectExpTaskSubmitStatsWithAllStudents(query);
+            Map<String, Object> result = new HashMap<>();
+            result.put("total", getLongValue(stats, "total"));
+            result.put("submitted", getLongValue(stats, "submitted"));
+            result.put("pending", getLongValue(stats, "pending"));
+            result.put("reviewed", getLongValue(stats, "reviewed"));
+            result.put("unsubmitted", getLongValue(stats, "unsubmitted"));
+            result.put("avgScore", getDoubleValue(stats, "avgScore"));
+
+            return success(result);
+        }
+        catch (Exception e)
+        {
+            logger.error("获取统计信息失败", e);
+            return error("获取统计信息失败");
         }
     }
 
@@ -1297,44 +1529,7 @@ public class ExpTaskController extends BaseController
         }
     }
 
-    /**
-     * 导出单个任务的成绩（基于模板）
-     */
-    @PreAuthorize("@ss.hasPermi('task:task:add')")
-    @Log(title = "导出成绩", businessType = BusinessType.EXPORT)
-    @GetMapping("/submit/export/{taskId}")
-    public void exportGrades(@PathVariable Long taskId, HttpServletResponse response)
-    {
-        try
-        {
-            // 1. 获取任务信息
-            ExpTask task = expTaskService.selectExpTaskByTaskId(taskId);
 
-            // 2. 获取该任务所属部门的所有学生提交记录（包括未提交的）
-            ExpTaskSubmit querySubmit = new ExpTaskSubmit();
-            querySubmit.setTaskId(taskId);
-            querySubmit.setDeptId(task.getDeptId());
-            List<ExpTaskSubmit> list = expTaskSubmitService.selectExpTaskSubmitListWithAllStudents(querySubmit);
-
-            // 3. 使用模板导出服务导出成绩
-            excelTemplateExportService.exportGradesByTemplate(task, list, response);
-        }
-        catch (Exception e)
-        {
-            logger.error("导出成绩失败", e);
-            try {
-                response.setContentType("application/json");
-                response.setCharacterEncoding("utf-8");
-                response.getWriter().write("{\"msg\":\"导出成绩失败：" + e.getMessage() + "\",\"code\":500}");
-            } catch (IOException ioException) {
-                logger.error("写入错误响应失败", ioException);
-            }
-        }
-    }
-
-    /**
-     * 横向汇总导出成绩(所有选中的实验在同一个Sheet中,每个实验占一列,只导出成绩不导出评语)
-     */
     @PreAuthorize("@ss.hasPermi('task:task:add')")
     @Log(title = "横向汇总导出成绩", businessType = BusinessType.EXPORT)
     @PostMapping("/submit/horizontalSummaryExport")
@@ -1527,5 +1722,46 @@ public class ExpTaskController extends BaseController
             return error("检查操作权限失败：" + e.getMessage());
         }
     }
-}
 
+    private long getLongValue(Map<String, Object> stats, String key)
+    {
+        Object value = stats != null ? stats.get(key) : null;
+        if (value instanceof Number)
+        {
+            return ((Number) value).longValue();
+        }
+        if (value instanceof String)
+        {
+            try
+            {
+                return Long.parseLong((String) value);
+            }
+            catch (NumberFormatException ignored)
+            {
+                return 0L;
+            }
+        }
+        return 0L;
+    }
+
+    private double getDoubleValue(Map<String, Object> stats, String key)
+    {
+        Object value = stats != null ? stats.get(key) : null;
+        if (value instanceof Number)
+        {
+            return ((Number) value).doubleValue();
+        }
+        if (value instanceof String)
+        {
+            try
+            {
+                return Double.parseDouble((String) value);
+            }
+            catch (NumberFormatException ignored)
+            {
+                return 0D;
+            }
+        }
+        return 0D;
+    }
+}

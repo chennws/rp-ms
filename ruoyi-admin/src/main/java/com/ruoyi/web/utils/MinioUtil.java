@@ -104,10 +104,29 @@ public class MinioUtil {
         }
         String fileName = IdUtils.randomUUID() + originalFilename.substring(originalFilename.lastIndexOf("."));
         String objectName = DateUtils.dateTimeNow("yyyy/MM/dd") + "/" + fileName;
+        return upload(file, objectName);
+    }
+
+    /**
+     * ?????????????
+     *
+     * @param file ??
+     * @param objectName ?????
+     * @return ?????
+     */
+    public String upload(MultipartFile file, String objectName) {
+        String originalFilename = file.getOriginalFilename();
+        if (StringUtils.isBlank(originalFilename)){
+            throw new RuntimeException();
+        }
+        if (StringUtils.isBlank(objectName)){
+            String fileName = IdUtils.randomUUID() + originalFilename.substring(originalFilename.lastIndexOf("."));
+            objectName = DateUtils.dateTimeNow("yyyy/MM/dd") + "/" + fileName;
+        }
         try {
             PutObjectArgs objectArgs = PutObjectArgs.builder().bucket(prop.getBucketName()).object(objectName)
                     .stream(file.getInputStream(), file.getSize(), -1).contentType(file.getContentType()).build();
-            //文件名称相同会覆盖
+            //?????????
             minioClient.putObject(objectArgs);
         } catch (Exception e) {
             e.printStackTrace();

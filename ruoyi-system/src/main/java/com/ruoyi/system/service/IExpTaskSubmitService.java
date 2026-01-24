@@ -37,6 +37,22 @@ public interface IExpTaskSubmitService
     public List<ExpTaskSubmit> selectExpTaskSubmitListWithAllStudents(ExpTaskSubmit expTaskSubmit);
 
     /**
+     * 鏌ヨ瀛︾敓鎻愪氦璁板綍鎬绘暟锛堝寘鎷墍鏈夊鐢燂紝鏈彁浜ょ殑涔熸樉绀猴級
+     *
+     * @param expTaskSubmit 瀛︾敓鎻愪氦璁板綍锛堝繀椤诲寘鍚玹askId鍜宒eptId锛?
+     * @return 瀛︾敓鎻愪氦璁板綍鎬绘暟
+     */
+    public long selectExpTaskSubmitListWithAllStudentsCount(ExpTaskSubmit expTaskSubmit);
+
+    /**
+     * Query submit statistics for all students in a task.
+     *
+     * @param expTaskSubmit query params (taskId, deptId, optional userName)
+     * @return stats map
+     */
+    public java.util.Map<String, Object> selectExpTaskSubmitStatsWithAllStudents(ExpTaskSubmit expTaskSubmit);
+
+    /**
      * 根据任务ID和用户ID查询提交记录
      *
      * @param taskId 任务ID

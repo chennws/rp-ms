@@ -36,7 +36,8 @@ export default {
   },
   data() {
     return {
-      title: process.env.VUE_APP_TITLE,
+      title: '实验报告管理系统',
+      shortTitle: '实验报告',
       logo: logoImg
     }
   }

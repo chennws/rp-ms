@@ -33,13 +33,28 @@ PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
                    ELSE t.status
                END as status,
                t.create_by, t.create_time, t.update_by, t.update_time, t.remark, t.report_file_url, t.academic_term,
-               d.dept_name,
-               (SELECT COUNT(*) FROM exp_task_submit WHERE task_id = t.task_id AND status IN ('1', '2', '3', '5', '6')) as submit_count,
-               (SELECT COUNT(*) FROM sys_user WHERE dept_id = t.dept_id AND del_flag = '0') as total_count,
-               (SELECT COUNT(*) FROM exp_task_submit WHERE task_id = t.task_id AND status IN ('3', '6')) as reviewed_count,
-               (SELECT COUNT(*) FROM exp_task_submit WHERE task_id = t.task_id AND status IN ('1', '2', '5')) as pending_count
+               COALESCE(dn.display_name, d.dept_name) as dept_name,
+               COALESCE(submit_stats.submit_count, 0) as submit_count,
+               COALESCE(user_stats.total_count, 0) as total_count,
+               COALESCE(submit_stats.reviewed_count, 0) as reviewed_count,
+               COALESCE(submit_stats.pending_count, 0) as pending_count
         from exp_task t
         left join sys_dept d on t.dept_id = d.dept_id
+        left join dept_display_name dn on t.dept_id = dn.dept_id
+        left join (
+            SELECT dept_id, COUNT(*) as total_count
+            FROM sys_user
+            WHERE del_flag = '0'
+            GROUP BY dept_id
+        ) user_stats on t.dept_id = user_stats.dept_id
+        left join (
+            SELECT task_id,
+                   SUM(CASE WHEN status IN ('1', '2', '3', '5', '6') THEN 1 ELSE 0 END) as submit_count,
+                   SUM(CASE WHEN status IN ('3', '6') THEN 1 ELSE 0 END) as reviewed_count,
+                   SUM(CASE WHEN status IN ('1', '2', '5') THEN 1 ELSE 0 END) as pending_count
+            FROM exp_task_submit
+            GROUP BY task_id
+        ) submit_stats on t.task_id = submit_stats.task_id
     </sql>
 
     <select id="selectExpTaskList" parameterType="ExpTask" resultMap="ExpTaskResult">

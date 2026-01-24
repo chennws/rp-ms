@@ -125,6 +125,18 @@ export function submitTask(taskId, documentKey, fileUrl) {
   })
 }
 
+// 学生上传附件提交任务
+export function submitTaskWithAttachment(taskId, fileUrl) {
+  return request({
+    url: '/Task/submit/upload',
+    method: 'post',
+    data: {
+      taskId: taskId,
+      fileUrl: fileUrl
+    }
+  })
+}
+
 // 创建副本
 // 学生打开编辑器前，从模板文件创建一个副本
 export function createCopy(taskId) {

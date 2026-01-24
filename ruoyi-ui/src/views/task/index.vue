@@ -12,6 +12,17 @@
             @keyup.enter.native="handleQuery"
           />
         </el-form-item>
+        <el-form-item v-if="isTeacher" label="班级" prop="deptId">
+          <treeselect
+            v-model="queryParams.deptId"
+            :options="deptOptions"
+            :disableBranchNodes="true"
+            :append-to-body="true"
+            placeholder="请选择班级"
+            style="width: 320px"
+            clearable
+          />
+        </el-form-item>
         <el-form-item>
           <el-button type="primary" icon="el-icon-search" @click="handleQuery">搜索</el-button>
           <el-button icon="el-icon-refresh" @click="resetQuery">重置</el-button>
@@ -95,13 +106,13 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="班级" prop="deptName" :show-overflow-tooltip="true" width="160">
+        <el-table-column label="班级" prop="deptName" min-width="160" class-name="dept-column">
           <template slot-scope="scope">
-            <span>{{ formatDeptName(scope.row.deptName) }}</span>
+            <span class="dept-name">{{ formatDeptName(scope.row.deptName) }}</span>
           </template>
         </el-table-column>
         <el-table-column label="课程" prop="courseName" :show-overflow-tooltip="true" width="120" />
-        <el-table-column label="发布时间" align="center" prop="createTime" width="105">
+        <el-table-column label="发布时间" align="center" prop="createTime" min-width="105">
           <template slot-scope="scope">
             <span>{{ parseTime(scope.row.createTime, '{y}-{m}-{d}') }}</span>
           </template>
@@ -126,7 +137,7 @@
             </div>
           </template>
         </el-table-column>
-        <el-table-column label="任务状态" align="center" width="85">
+        <el-table-column label="任务状态" align="center" min-width="85">
           <template slot-scope="scope">
             <el-tag v-if="scope.row.status === '0'" type="warning" size="small">未开始</el-tag>
             <el-tag v-else-if="scope.row.status === '1'" type="primary" size="small">进行中</el-tag>
@@ -134,7 +145,7 @@
           </template>
         </el-table-column>
         <!-- 学生端显示报告状态 -->
-        <el-table-column v-if="!isTeacher" label="报告状态" align="center" width="85">
+        <el-table-column v-if="!isTeacher" label="报告状态" align="center" min-width="85">
           <template slot-scope="scope">
             <el-tag v-if="!scope.row.studentSubmitStatus" type="info" size="small">未开始</el-tag>
             <el-tag v-else :type="getStateType(scope.row.studentSubmitStatus)" size="small">
@@ -167,6 +178,13 @@
               icon="el-icon-edit-outline"
               @click="handleOnlineComplete(scope.row)"
             >在线完成</el-button>
+            <el-button
+              v-if="!isTeacher && scope.row.status === '1' && (!scope.row.studentSubmitStatus || scope.row.studentSubmitStatus === '0' || scope.row.studentSubmitStatus === '4')"
+              size="mini"
+              type="warning"
+              icon="el-icon-upload"
+              @click="handleUploadAttachment(scope.row)"
+            >上传附件</el-button>
             <!-- 学生端：预览报告（已提交、批阅中、已批阅、重新提交状态） -->
             <el-button
               v-if="!isTeacher && ['1', '2', '3', '5', '6'].includes(scope.row.studentSubmitStatus)"
@@ -201,13 +219,6 @@
               v-hasPermi="['task:task:remove']"
               plain
             >删除</el-button>
-            <el-button
-              v-if="scope.row.status === '2'"
-              size="mini"
-              type="info"
-              icon="el-icon-data-analysis"
-              @click="handleStatistics(scope.row)"
-            >统计</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -240,10 +251,10 @@
             :options="deptOptions"
             :show-count="true"
             :multiple="true"
-            :flat="true"
             :disabled="form.taskId != undefined"
             :disableBranchNodes="true"
             placeholder="请选择发布部门（只能选择班级）"
+            @open="handleTreeOpen"
           />
           <span class="form-tip" v-if="form.taskId == undefined">只能选择班级（最后一级部门），可以同时选择多个班级</span>
           <span class="form-tip" v-else style="color: #E6A23C;">编辑任务时不能修改发布部门</span>
@@ -264,7 +275,14 @@
           <span class="form-tip">点击"生成"按钮自动生成当前学年学期</span>
         </el-form-item>
         <el-form-item label="实验报告">
-          <file-upload v-model="form.reportFileUrl" :limit="1" :fileSize="10" :fileType="['doc', 'docx', 'pdf', 'txt']" action="/Task/upload" />
+          <file-upload
+            v-model="form.reportFileUrl"
+            :limit="1"
+            :fileSize="10"
+            :fileType="['doc', 'docx', 'pdf', 'txt']"
+            action="/Task/upload"
+            :data="{ taskName: form.taskName, courseName: form.courseName, deptId: form.deptIds && form.deptIds.length > 0 ? form.deptIds[0] : undefined }"
+          />
         </el-form-item>
         <el-form-item label="备注">
           <el-input v-model="form.remark" type="textarea" placeholder="请输入备注" />
@@ -382,11 +400,34 @@
         <el-button @click="rejectReasonOpen = false">关 闭</el-button>
       </div>
     </el-dialog>
+
+    <!-- 学生端：上传附件对话框 -->
+    <el-dialog title="上传附件" :visible.sync="attachmentOpen" width="600px" append-to-body>
+      <el-form ref="attachmentFormRef" :model="attachmentForm" :rules="attachmentRules" label-width="100px">
+        <el-form-item label="任务名称">
+          <el-input v-model="attachmentForm.taskName" disabled />
+        </el-form-item>
+        <el-form-item label="附件文件" prop="fileUrl">
+          <file-upload
+            v-model="attachmentForm.fileUrl"
+            :limit="1"
+            :fileSize="20"
+            :fileType="['doc', 'docx', 'pdf', 'txt', 'zip', 'rar']"
+            action="/Task/upload/student"
+            :data="{ taskId: attachmentForm.taskId }"
+          />
+        </el-form-item>
+      </el-form>
+      <div slot="footer" class="dialog-footer">
+        <el-button type="primary" @click="submitAttachment">确 定</el-button>
+        <el-button @click="attachmentOpen = false">取 消</el-button>
+      </div>
+    </el-dialog>
   </div>
 </template>
 
 <script>
-import { listTask, getTask, delTask, addTask, updateTask, downloadReport, getMySubmitDetail } from "@/api/task/task"
+import { listTask, getTask, delTask, addTask, updateTask, downloadReport, getMySubmitDetail, submitTaskWithAttachment } from "@/api/task/task"
 import { listDeptForTask } from "@/api/system/dept"
 import { handleTree } from "@/utils/ruoyi"
 import Treeselect from "@riophae/vue-treeselect"
@@ -418,12 +459,13 @@ export default {
       // 是否显示打回原因弹出层
       rejectReasonOpen: false,
       // 部门树选项
-      deptOptions: undefined,
+      deptOptions: [],
       // 查询参数
       queryParams: {
         pageNum: 1,
         pageSize: 10,
-        keyword: undefined
+        keyword: undefined,
+        deptId: undefined
       },
       // 表单参数
       form: {},
@@ -435,6 +477,14 @@ export default {
       rejectReasonForm: {},
       // 当前打回任务（用于立即修改）
       currentRejectTask: null,
+      // 学生端：是否显示上传附件对话框
+      attachmentOpen: false,
+      // 学生端：附件提交表单
+      attachmentForm: {
+        taskId: undefined,
+        taskName: '',
+        fileUrl: ''
+      },
       // 学生端：当前选中的状态标签
       activeStatusTab: 'all',
       // 学生端：各状态的任务数量
@@ -447,6 +497,12 @@ export default {
         '3': 0,
         '4': 0,
         '5': 0
+      },
+      // 学生端：附件表单校验
+      attachmentRules: {
+        fileUrl: [
+          { required: true, message: "请上传附件文件", trigger: "change" }
+        ]
       },
       // 表单校验
       rules: {
@@ -507,6 +563,9 @@ export default {
   },
   created() {
     this.getList()
+    if (this.isTeacher) {
+      this.getDeptTree()
+    }
   },
   activated() {
     // 页面激活时刷新列表（从编辑页面返回时）
@@ -518,7 +577,8 @@ export default {
       this.loading = true
       const params = {
         pageNum: this.queryParams.pageNum,
-        pageSize: this.queryParams.pageSize
+        pageSize: this.queryParams.pageSize,
+        deptId: this.queryParams.deptId
       }
       if (this.queryParams.keyword) {
         params.taskName = this.queryParams.keyword
@@ -584,18 +644,23 @@ export default {
       if (this.deptOptions && this.deptOptions.length > 0) {
         return
       }
+      console.log('开始加载部门树...')
       listDeptForTask().then(response => {
+        console.log('部门树API响应:', response)
         const deptTree = handleTree(response.data, "deptId", "parentId")
+        console.log('处理后的部门树:', deptTree)
         this.deptOptions = this.convertDeptTree(deptTree)
+        console.log('转换后的deptOptions:', this.deptOptions)
+        console.log('deptOptions第一个节点:', JSON.stringify(this.deptOptions[0], null, 2))
       }).catch(error => {
         // 权限不足时静默失败，不影响页面使用
-        console.warn('加载部门列表失败，可能没有权限:', error)
+        console.error('加载部门列表失败:', error)
         this.deptOptions = []
       })
     },
     /** 转换部门数据结构为treeselect格式 */
     convertDeptTree(tree) {
-      return tree.map(node => {
+      const result = tree.map(node => {
         const item = {
           id: node.deptId,
           label: node.deptName
@@ -605,6 +670,14 @@ export default {
         }
         return item
       })
+      console.log('convertDeptTree 输入:', tree)
+      console.log('convertDeptTree 输出:', result)
+      return result
+    },
+    /** 树选择器打开时的回调 */
+    handleTreeOpen() {
+      console.log('树选择器打开了')
+      console.log('当前deptOptions:', this.deptOptions)
     },
     // 取消按钮
     cancel() {
@@ -634,6 +707,7 @@ export default {
     /** 重置按钮操作 */
     resetQuery() {
       this.resetForm("queryForm")
+      this.queryParams.deptId = undefined
       this.handleQuery()
     },
     /** 新增按钮操作 */
@@ -731,6 +805,10 @@ export default {
           this.$modal.msgWarning("暂无提交记录")
           return
         }
+        if (!submit.documentKey) {
+          downloadReport(submit.fileUrl)
+          return
+        }
         // 跳转到在线编辑页面，只读模式
         this.$router.push({
           path: '/task/edit',
@@ -753,10 +831,6 @@ export default {
       }
       downloadReport(this.viewForm.reportFileUrl)
     },
-    /** 成绩统计按钮操作 */
-    handleStatistics(row) {
-      this.$router.push({ path: '/task/statistics', query: { taskId: row.taskId } })
-    },
     /** 在线完成按钮操作 */
     handleOnlineComplete(row) {
       // 获取任务详情以获取文件URL
@@ -777,6 +851,30 @@ export default {
         })
       }).catch(() => {
         this.$modal.msgError("获取任务信息失败")
+      })
+    },
+    /** 学生端：上传附件 */
+    handleUploadAttachment(row) {
+      this.attachmentForm = {
+        taskId: row.taskId,
+        taskName: row.taskName,
+        fileUrl: ''
+      }
+      this.attachmentOpen = true
+    },
+    /** 学生端：提交附件 */
+    submitAttachment() {
+      this.$refs.attachmentFormRef.validate(valid => {
+        if (!valid) {
+          return
+        }
+        submitTaskWithAttachment(this.attachmentForm.taskId, this.attachmentForm.fileUrl).then(() => {
+          this.$modal.msgSuccess("提交成功")
+          this.attachmentOpen = false
+          this.getList()
+        }).catch(() => {
+          this.$modal.msgError("提交失败")
+        })
       })
     },
     /** 提交按钮 */
@@ -877,6 +975,7 @@ export default {
 .search-card {
   margin-bottom: 20px;
   border-radius: 8px;
+  overflow: visible;
 }
 
 /* 状态筛选卡片 */
@@ -919,6 +1018,24 @@ export default {
   margin-bottom: 18px;
 }
 
+.task-index-container ::v-deep .vue-treeselect__menu {
+  z-index: 3000;
+  min-width: 320px;
+}
+
+.task-index-container ::v-deep .vue-treeselect__label {
+  white-space: normal !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+  line-height: 1.4;
+}
+
+.task-index-container ::v-deep .vue-treeselect__single-value {
+  white-space: normal !important;
+  overflow: visible !important;
+  text-overflow: clip !important;
+}
+
 /* 表格卡片 */
 .table-card {
   border-radius: 8px;
@@ -926,6 +1043,30 @@ export default {
 
 .task-table {
   font-size: 14px;
+}
+
+.task-table ::v-deep .el-table__cell {
+  padding: clamp(8px, 1.2vw, 14px) clamp(8px, 1.5vw, 18px);
+}
+
+/* 表格所有列不换行 */
+.task-table ::v-deep .el-table__cell {
+  white-space: nowrap;
+}
+
+/* 表格表头不换行 */
+.task-table ::v-deep .el-table__header th {
+  white-space: nowrap;
+}
+
+/* 班级列样式 - 不换行不省略 */
+.task-table ::v-deep .dept-column {
+  overflow: visible;
+}
+
+.dept-name {
+  white-space: nowrap;
+  display: inline-block;
 }
 
 /* 任务名称 */
@@ -1159,4 +1300,3 @@ export default {
   border-left-color: #909399;
 }
 </style>
-

@@ -4,6 +4,8 @@ import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.stream.Collectors;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import com.ruoyi.common.annotation.DataScope;
@@ -20,6 +22,7 @@ import com.ruoyi.common.utils.spring.SpringUtils;
 import com.ruoyi.system.mapper.SysDeptMapper;
 import com.ruoyi.system.mapper.SysRoleMapper;
 import com.ruoyi.system.service.ISysDeptService;
+import com.ruoyi.system.service.IDeptDisplayNameService;
 
 /**
  * 部门管理 服务实现
@@ -29,11 +32,16 @@ import com.ruoyi.system.service.ISysDeptService;
 @Service
 public class SysDeptServiceImpl implements ISysDeptService
 {
+    private static final Logger log = LoggerFactory.getLogger(SysDeptServiceImpl.class);
+
     @Autowired
     private SysDeptMapper deptMapper;
 
     @Autowired
     private SysRoleMapper roleMapper;
+
+    @Autowired
+    private IDeptDisplayNameService deptDisplayNameService;
 
     /**
      * 查询部门管理数据
@@ -211,6 +219,9 @@ public class SysDeptServiceImpl implements ISysDeptService
     @Override
     public int insertDept(SysDept dept)
     {
+        log.info("========== 开始新增部门 ==========");
+        log.info("部门名称: {}, 父部门ID: {}", dept.getDeptName(), dept.getParentId());
+
         SysDept info = deptMapper.selectDeptById(dept.getParentId());
         // 如果父节点不为正常状态,则不允许新增子节点
         if (!UserConstants.DEPT_NORMAL.equals(info.getStatus()))
@@ -218,7 +229,33 @@ public class SysDeptServiceImpl implements ISysDeptService
             throw new ServiceException("部门停用，不允许新增");
         }
         dept.setAncestors(info.getAncestors() + "," + dept.getParentId());
-        return deptMapper.insertDept(dept);
+        int result = deptMapper.insertDept(dept);
+
+        log.info("部门保存结果: {}, 部门ID: {}", result, dept.getDeptId());
+
+        // 异步更新部门显示名称
+        if (result > 0 && dept.getDeptId() != null)
+        {
+            log.info("准备调用异步更新, deptId: {}, deptDisplayNameService是否为null: {}",
+                    dept.getDeptId(), (deptDisplayNameService == null));
+
+            if (deptDisplayNameService != null)
+            {
+                log.info("开始调用异步更新方法");
+                deptDisplayNameService.updateDeptDisplayName(dept.getDeptId());
+                log.info("异步更新方法调用完成");
+            }
+            else
+            {
+                log.error("deptDisplayNameService 为 null，无法更新显示名称");
+            }
+        }
+        else
+        {
+            log.warn("不满足更新条件: result={}, deptId={}", result, dept.getDeptId());
+        }
+
+        return result;
     }
 
     /**
@@ -246,6 +283,25 @@ public class SysDeptServiceImpl implements ISysDeptService
             // 如果该部门是启用状态，则启用该部门的所有上级部门
             updateParentDeptStatusNormal(dept);
         }
+
+        // 异步更新部门显示名称
+        if (result > 0)
+        {
+            deptDisplayNameService.updateDeptDisplayName(dept.getDeptId());
+
+            // 如果修改了部门名称或祖级关系，需要更新所有子部门的显示名称
+            if (oldDept != null &&
+                (!dept.getDeptName().equals(oldDept.getDeptName()) ||
+                 !dept.getAncestors().equals(oldDept.getAncestors())))
+            {
+                List<SysDept> children = deptMapper.selectChildrenDeptById(dept.getDeptId());
+                for (SysDept child : children)
+                {
+                    deptDisplayNameService.updateDeptDisplayName(child.getDeptId());
+                }
+            }
+        }
+
         return result;
     }
 
@@ -290,6 +346,10 @@ public class SysDeptServiceImpl implements ISysDeptService
     @Override
     public int deleteDeptById(Long deptId)
     {
+        // 先删除部门显示名称
+        deptDisplayNameService.deleteDeptDisplayName(deptId);
+
+        // 再删除部门
         return deptMapper.deleteDeptById(deptId);
     }
 

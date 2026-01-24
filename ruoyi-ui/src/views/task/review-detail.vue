@@ -28,9 +28,9 @@
     <div class="main-content">
       <!-- 左侧：OnlyOffice编辑器 -->
       <div class="editor-section">
-        <div v-if="loading" class="loading-container" v-loading="loading" element-loading-text="正在加载文档编辑器...">
+        <div v-show="loading" class="loading-container" v-loading="loading" element-loading-text="正在加载文档编辑器...">
         </div>
-        <div v-if="error" class="error-container">
+        <div v-show="error" class="error-container">
           <el-result icon="error" :title="error">
             <template slot="subTitle">
               <p v-if="error.includes('容器')">页面初始化异常，请尝试以下操作：</p>
@@ -55,7 +55,17 @@
             </template>
           </el-result>
         </div>
-        <div id="onlyoffice-review" class="onlyoffice-container" :style="{ display: loading || error ? 'none' : 'block' }"></div>
+        <div v-if="attachmentOnly" class="attachment-container">
+          <el-result icon="info" title="该报告为附件上传">
+            <template slot="subTitle">
+              请下载附件查看后进行批改
+            </template>
+            <template slot="extra">
+              <el-button type="primary" size="small" icon="el-icon-download" @click="handleDownloadAttachment">下载附件</el-button>
+            </template>
+          </el-result>
+        </div>
+        <div v-else id="onlyoffice-review" ref="onlyofficeReview" class="onlyoffice-container" :style="{ display: loading || error ? 'none' : 'block' }"></div>
       </div>
 
       <!-- 右侧：批改表单 -->
@@ -206,7 +216,7 @@
 
 <script>
 import { getReviewDetail, saveReview, getSubmitIdList } from "@/api/task/review"
-import { getConfig } from "@/api/task/task"
+import { downloadReport, getConfig } from "@/api/task/task"
 import { rejectReport, getPermittedActions } from "@/api/task/stateMachine"
 import { getToken } from "@/utils/auth"
 import { ReportState, ReportTrigger, getStateDesc, getStateType } from "@/constants/reportState"
@@ -233,11 +243,19 @@ export default {
       editor: null,
       documentKey: '',
       fileUrl: '',
+      attachmentOnly: false,
       loading: true,
       error: null,
       documentServerUrl: process.env.VUE_APP_DOCUMENT_SERVER_URL || 'http://47.115.163.152:9001/web-apps/apps/api/documents/api.js',
       editorInitRetryCount: 0, // 编辑器初始化重试次数
-      maxRetryCount: 10, // 最大重试次数
+      maxRetryCount: 30, // 最大重试次数
+      editorInitTimer: null,
+      editorInitSeq: 0,
+      editorConfigRequestSeq: 0,
+      submitDetailRequestSeq: 0,
+      isMounted: false,
+      pendingEditorInit: false,
+      editorInitializing: false,
       // 导航相关
       submitIdList: [],
       prevSubmitId: null,
@@ -295,6 +313,9 @@ export default {
           this.editor = null
         }
 
+        // 取消旧的初始化任务
+        this.cancelEditorInit()
+
         // 重置状态
         this.loading = true
         this.error = null
@@ -302,6 +323,9 @@ export default {
 
         // 更新 submitId
         this.submitId = newSubmitId
+
+        // 同步只读模式参数
+        this.viewOnly = to.query.viewOnly === 'true'
 
         // 重新加载数据
         this.loadSubmitDetail()
@@ -328,9 +352,15 @@ export default {
     this.bindKeyboardShortcuts()
   },
   mounted() {
-    // 初始化编辑器会在loadSubmitDetail中完成
+    this.isMounted = true
+    if (this.pendingEditorInit) {
+      this.pendingEditorInit = false
+      this.initEditor()
+    }
   },
   beforeDestroy() {
+    this.isMounted = false
+    this.cancelEditorInit()
     // 销毁编辑器
     if (this.editor) {
       this.editor.destroyEditor()
@@ -339,22 +369,56 @@ export default {
     this.unbindKeyboardShortcuts()
   },
   methods: {
+    cancelEditorInit() {
+      if (this.editorInitTimer) {
+        clearTimeout(this.editorInitTimer)
+        this.editorInitTimer = null
+      }
+      this.editorInitSeq += 1
+      this.editorConfigRequestSeq += 1
+      this.submitDetailRequestSeq += 1
+      this.pendingEditorInit = false
+      this.editorInitializing = false
+    },
+    queueEditorInit() {
+      if (this.isMounted) {
+        this.initEditor()
+      } else {
+        this.pendingEditorInit = true
+      }
+    },
     /** 加载提交详情 */
     loadSubmitDetail() {
+      this.submitDetailRequestSeq += 1
+      const requestSeq = this.submitDetailRequestSeq
+      const submitId = this.submitId
+
       getReviewDetail(this.submitId).then(response => {
+        if (requestSeq !== this.submitDetailRequestSeq || submitId !== this.submitId) {
+          return
+        }
         this.submitInfo = response.data
         this.form.score = response.data.score
         this.form.teacherRemark = response.data.teacherRemark || ''
         this.fileUrl = response.data.fileUrl
         this.documentKey = response.data.documentKey
+        this.attachmentOnly = !this.canPreviewInOnlyOffice(this.fileUrl)
 
         console.log('提交详情:', response.data)
         console.log('fileUrl:', this.fileUrl)
         console.log('documentKey:', this.documentKey)
 
+        if (this.attachmentOnly) {
+          this.loading = false
+          return
+        }
+
         // 初始化OnlyOffice
-        this.initEditor()
+        this.queueEditorInit()
       }).catch(() => {
+        if (requestSeq !== this.submitDetailRequestSeq || submitId !== this.submitId) {
+          return
+        }
         this.$modal.msgError("获取批改详情失败")
         this.$router.back()
       })
@@ -393,6 +457,23 @@ export default {
     },
     /** 初始化OnlyOffice编辑器 */
     initEditor() {
+      if (this.editorInitializing) {
+        return
+      }
+      this.editorInitSeq += 1
+      const initSeq = this.editorInitSeq
+
+      if (this.editorInitTimer) {
+        clearTimeout(this.editorInitTimer)
+        this.editorInitTimer = null
+      }
+
+      if (!this.isMounted) {
+        this.pendingEditorInit = true
+        return
+      }
+
+      this.editorInitializing = true
       this.loading = true
       this.error = null
 
@@ -400,23 +481,33 @@ export default {
       console.log('文档服务器地址:', this.documentServerUrl)
 
       this.$nextTick(() => {
-        const container = document.getElementById('onlyoffice-review')
-        if (!container) {
+        if (initSeq !== this.editorInitSeq) {
+          return
+        }
+        const container = this.$refs.onlyofficeReview
+        if (!container || !(this.$el && this.$el.contains(container))) {
           // 检查重试次数
           if (this.editorInitRetryCount >= this.maxRetryCount) {
             console.error('容器元素初始化失败，已达最大重试次数')
             this.error = '编辑器加载失败，请刷新页面重试'
             this.loading = false
+            this.editorInitializing = false
             this.editorInitRetryCount = 0 // 重置计数器
             return
           }
 
           console.warn(`容器元素暂时未找到，等待DOM渲染... (重试 ${this.editorInitRetryCount + 1}/${this.maxRetryCount})`)
           this.editorInitRetryCount++
+          this.editorInitializing = false
           // 继续保持加载状态，而不是显示错误
           // 延迟重试
-          setTimeout(() => {
-            this.initEditor()
+          if (this.editorInitTimer) {
+            clearTimeout(this.editorInitTimer)
+          }
+          this.editorInitTimer = setTimeout(() => {
+            if (initSeq === this.editorInitSeq) {
+              this.initEditor()
+            }
           }, 100)
           return
         }
@@ -434,17 +525,25 @@ export default {
           script.type = 'text/javascript'
           script.src = this.documentServerUrl
           script.onload = () => {
+            if (initSeq !== this.editorInitSeq) {
+              return
+            }
             console.log('OnlyOffice API 脚本加载成功')
             if (window.DocsAPI && window.DocsAPI.DocEditor) {
               this.createEditor()
             } else {
               this.error = '文档编辑器服务未响应'
               this.loading = false
+              this.editorInitializing = false
             }
           }
           script.onerror = () => {
+            if (initSeq !== this.editorInitSeq) {
+              return
+            }
             this.error = '无法连接到文档编辑器服务'
             this.loading = false
+            this.editorInitializing = false
           }
           document.head.appendChild(script)
         }
@@ -455,13 +554,27 @@ export default {
       if (!window.DocsAPI || !window.DocsAPI.DocEditor) {
         this.error = "文档编辑器API未加载"
         this.loading = false
+        this.editorInitializing = false
         return
       }
+
+      const requestSeq = this.editorConfigRequestSeq + 1
+      this.editorConfigRequestSeq = requestSeq
+      const submitId = this.submitId
+      const documentKey = this.documentKey
+      const fileUrl = this.fileUrl
 
       // 调用后端接口获取编辑器配置
       console.log('获取编辑器配置, fileUrl:', this.fileUrl, 'documentKey:', this.documentKey)
 
-      getConfig(this.fileUrl, 'edit', this.documentKey).then(response => {
+      const editorMode = this.viewOnly ? 'view' : 'edit'
+      getConfig(this.fileUrl, editorMode, this.documentKey).then(response => {
+        if (requestSeq !== this.editorConfigRequestSeq) {
+          return
+        }
+        if (submitId !== this.submitId || documentKey !== this.documentKey || fileUrl !== this.fileUrl) {
+          return
+        }
         if (!response.data) {
           throw new Error('获取编辑器配置失败')
         }
@@ -515,6 +628,9 @@ export default {
         // 事件处理
         config.events = {
           onDocumentReady: () => {
+            if (requestSeq !== this.editorConfigRequestSeq) {
+              return
+            }
             console.log('[OnlyOffice] 文档已准备就绪')
             this.loading = false
             if (this.viewOnly) {
@@ -526,47 +642,65 @@ export default {
             }
           },
           onError: (error) => {
+            if (requestSeq !== this.editorConfigRequestSeq) {
+              return
+            }
             console.error('[OnlyOffice] 编辑器错误:', error)
             this.error = `文档加载失败 (错误代码: ${error.errorCode || '未知'})`
             this.loading = false
+            this.editorInitializing = false
           }
         }
 
         // 创建编辑器实例
         try {
-          console.log('开始创建 OnlyOffice 编辑器实例')
-          // 检查容器是否还存在
-          const container = document.getElementById('onlyoffice-review')
-          if (!container) {
-            // 检查重试次数
-            if (this.editorInitRetryCount >= this.maxRetryCount) {
-              console.error('创建编辑器时容器丢失，已达最大重试次数')
-              this.error = '编辑器加载失败，请刷新页面重试'
-              this.loading = false
+      console.log('开始创建 OnlyOffice 编辑器实例')
+      // 检查容器是否还存在
+      const container = this.$refs.onlyofficeReview
+      if (!container || !(this.$el && this.$el.contains(container))) {
+        // 检查重试次数
+        if (this.editorInitRetryCount >= this.maxRetryCount) {
+          console.error('创建编辑器时容器丢失，已达最大重试次数')
+          this.error = '编辑器加载失败，请刷新页面重试'
+          this.loading = false
+          this.editorInitializing = false
               this.editorInitRetryCount = 0
+              this.editorInitializing = false
               return
             }
 
             console.warn(`创建编辑器时容器丢失，等待重新加载... (重试 ${this.editorInitRetryCount + 1}/${this.maxRetryCount})`)
             this.editorInitRetryCount++
+            this.editorInitializing = false
             // 继续保持加载状态，延迟重试
-            setTimeout(() => {
-              this.initEditor()
+            if (this.editorInitTimer) {
+              clearTimeout(this.editorInitTimer)
+            }
+            this.editorInitTimer = setTimeout(() => {
+              if (requestSeq === this.editorConfigRequestSeq) {
+                this.initEditor()
+              }
             }, 200)
             return
           }
 
           this.editor = new window.DocsAPI.DocEditor('onlyoffice-review', config)
+          this.editorInitializing = false
           console.log('编辑器实例创建成功')
         } catch (error) {
           console.error('创建编辑器失败:', error)
           this.error = `创建文档编辑器失败: ${error.message}`
           this.loading = false
+          this.editorInitializing = false
         }
       }).catch(error => {
+        if (requestSeq !== this.editorConfigRequestSeq) {
+          return
+        }
         console.error('获取编辑器配置失败:', error)
         this.error = '无法获取文档配置'
         this.loading = false
+        this.editorInitializing = false
       })
     },
     /** 获取错误消息 */
@@ -588,6 +722,7 @@ export default {
       this.error = null
       this.loading = true
       this.editorInitRetryCount = 0 // 重置重试计数器
+      this.cancelEditorInit()
       this.initEditor()
     },
     /** 获取用户ID */
@@ -656,10 +791,7 @@ export default {
             this.$message({
               message: '所有报告已批改完成！',
               type: 'success',
-              duration: 2000,
-              onClose: () => {
-                this.$router.push('/review')
-              }
+              duration: 1500
             })
             // 延迟跳转，让用户看到提示信息
             setTimeout(() => {
@@ -673,6 +805,20 @@ export default {
             if (!nextId || isNaN(parseInt(nextId))) {
               console.error('无效的下一个报告ID:', nextId)
               this.$modal.msgError("获取下一个报告失败，返回批改列表")
+              setTimeout(() => {
+                this.$router.push('/review')
+              }, 1500)
+              return
+            }
+
+            // 检查是否跳转到当前报告（避免死循环）
+            if (nextId === this.submitId) {
+              console.warn('下一个报告ID与当前相同，可能是状态更新延迟，返回批改列表')
+              this.$message({
+                message: '所有报告已批改完成！',
+                type: 'success',
+                duration: 1500
+              })
               setTimeout(() => {
                 this.$router.push('/review')
               }, 1500)
@@ -718,6 +864,27 @@ export default {
     /** 返回列表 */
     handleBack() {
       this.$router.push(`/task/review/${this.taskId}`)
+    },
+    /** 判断附件是否支持OnlyOffice在线批改 */
+    canPreviewInOnlyOffice(fileUrl) {
+      if (!fileUrl) {
+        return false
+      }
+      const cleanUrl = fileUrl.split('?')[0]
+      const lastDotIndex = cleanUrl.lastIndexOf('.')
+      if (lastDotIndex === -1) {
+        return false
+      }
+      const ext = cleanUrl.substring(lastDotIndex + 1).toLowerCase()
+      return ['doc', 'docx', 'pdf', 'ppt', 'pptx', 'xls', 'xlsx'].includes(ext)
+    },
+    /** 下载附件 */
+    handleDownloadAttachment() {
+      if (!this.fileUrl) {
+        this.$modal.msgWarning("附件地址为空")
+        return
+      }
+      downloadReport(this.fileUrl)
     },
     /** 打开打回对话框 */
     handleReject() {
@@ -851,6 +1018,14 @@ export default {
   height: 100%;
   background: #f5f5f5;
   padding: 20px;
+}
+
+.attachment-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  background: #f5f5f5;
 }
 
 .form-section {

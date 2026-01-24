@@ -133,13 +133,7 @@
             type="warning"
             @click="handleStartReview(scope.row)"
           >继续批改</el-button>
-          <!-- 已批阅、已归档：显示"查看报告" -->
-          <el-button
-            v-if="scope.row.submitTime && (scope.row.status === ReportState.REVIEWED || scope.row.status === ReportState.ARCHIVED)"
-            size="mini"
-            type="text"
-            @click="handleViewReport(scope.row)"
-          >查看报告</el-button>
+          <!-- 已批阅、已归档：不显示查看按钮 -->
           <!-- 未提交 -->
           <span v-if="!scope.row.submitTime" style="color: #999;">-</span>
         </template>
@@ -158,13 +152,12 @@
     <!-- 底部操作 -->
     <div style="margin-top: 20px;">
       <el-button type="default" icon="el-icon-back" @click="handleBack">返回任务列表</el-button>
-      <el-button type="success" icon="el-icon-download" @click="handleExportGrades">批量导出成绩</el-button>
     </div>
   </div>
 </template>
 
 <script>
-import { getSubmitList, getTaskInfo, exportGrades } from "@/api/task/review"
+import { getSubmitList, getSubmitStats, getTaskInfo } from "@/api/task/review"
 import { startReview } from "@/api/task/stateMachine"
 import { ReportState, getStateDesc, getStateType } from "@/constants/reportState"
 
@@ -244,16 +237,27 @@ export default {
         keyword: this.queryParams.keyword
       }
 
-      getSubmitList(this.taskId, params).then(response => {
-        this.submitList = response.rows
-        this.total = response.total
-        this.loading = false
+      const listPromise = getSubmitList(this.taskId, params)
+      const statsPromise = getSubmitStats(this.taskId, { keyword: this.queryParams.keyword })
 
-        // 计算统计信息
-        this.calculateStatistics(response.rows)
-      }).catch(() => {
+      Promise.allSettled([listPromise, statsPromise]).then(results => {
+        const listResult = results[0]
+        const statsResult = results[1]
+
+        if (listResult.status === 'fulfilled') {
+          this.submitList = listResult.value.rows
+          this.total = listResult.value.total
+        } else {
+          this.$modal.msgError("获取提交列表失败")
+        }
+
+        if (statsResult.status === 'fulfilled') {
+          this.applyStatistics(statsResult.value.data)
+        } else if (listResult.status === 'fulfilled') {
+          this.calculateStatistics(this.submitList)
+        }
+      }).finally(() => {
         this.loading = false
-        this.$modal.msgError("获取提交列表失败")
       })
     },
     /** 计算统计信息 */
@@ -273,6 +277,18 @@ export default {
       } else {
         this.statistics.avgScore = 0
       }
+    },
+    applyStatistics(stats) {
+      const toNumber = (value) => {
+        const num = Number(value)
+        return Number.isFinite(num) ? num : 0
+      }
+      this.statistics.total = toNumber(stats && stats.total)
+      this.statistics.submitted = toNumber(stats && stats.submitted)
+      this.statistics.reviewed = toNumber(stats && stats.reviewed)
+      this.statistics.pending = toNumber(stats && stats.pending)
+      this.statistics.unsubmitted = toNumber(stats && stats.unsubmitted)
+      this.statistics.avgScore = toNumber(stats && stats.avgScore)
     },
     /** 搜索按钮操作 */
     handleQuery() {
@@ -314,32 +330,9 @@ export default {
         })
       }
     },
-    /** 查看报告 */
-    handleViewReport(row) {
-      this.$router.push({
-        path: `/task/review/${this.taskId}/${row.submitId}`,
-        query: {
-          viewOnly: true
-        }
-      })
-    },
     /** 返回任务列表 */
     handleBack() {
       this.$router.push('/task')
-    },
-    /** 批量导出成绩 */
-    handleExportGrades() {
-      this.$modal.confirm('确认导出该任务的所有成绩？').then(() => {
-        return exportGrades(this.taskId)
-      }).then(response => {
-        // 下载文件
-        const blob = new Blob([response], { type: 'application/vnd.ms-excel' })
-        const link = document.createElement('a')
-        link.href = window.URL.createObjectURL(blob)
-        link.download = `${this.taskName}-成绩单.xlsx`
-        link.click()
-        this.$modal.msgSuccess("导出成功")
-      }).catch(() => {})
     },
     /** 获取状态描述 */
     getStateDesc(status) {
@@ -354,11 +347,7 @@ export default {
       // 已提交、重新提交状态可以开始批改
       return status === ReportState.SUBMITTED || status === ReportState.RESUBMITTED
     },
-    /** 判断是否可以查看报告 */
-    canViewReport(status) {
-      // 批阅中、已批阅、已归档状态可以查看
-      return status === ReportState.REVIEWING || status === ReportState.REVIEWED || status === ReportState.ARCHIVED
-    }
+    // 取消查看报告功能
   }
 }
 </script>

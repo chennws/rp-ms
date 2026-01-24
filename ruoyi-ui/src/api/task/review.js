@@ -40,14 +40,6 @@ export function saveReview(data) {
  * 批量导出成绩
  * @param {Number} taskId 任务ID
  */
-export function exportGrades(taskId) {
-  return request({
-    url: `/Task/submit/export/${taskId}`,
-    method: 'get',
-    responseType: 'blob'
-  })
-}
-
 /**
  * 获取提交ID列表（用于上一个/下一个导航）
  * @param {Number} taskId 任务ID
@@ -56,6 +48,19 @@ export function getSubmitIdList(taskId) {
   return request({
     url: `/Task/submit/idList/${taskId}`,
     method: 'get'
+  })
+}
+
+/**
+ * 获取提交统计信息（批改列表页）
+ * @param {Number} taskId 任务ID
+ * @param {Object} params 查询参数
+ */
+export function getSubmitStats(taskId, params) {
+  return request({
+    url: `/Task/submit/stats/${taskId}`,
+    method: 'get',
+    params
   })
 }
 
