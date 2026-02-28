@@ -100,13 +100,14 @@ export default {
       this.loading = true
       this.error = null
 
-      // 如果是只读模式且已经有fileUrl，直接初始化编辑器
+      // 如果是只读模式且已经有fileUrl，直接初始化编辑器（预览已提交的报告）
       if (this.isReadOnly && this.templateUrl) {
-        console.log('=== 只读模式：直接使用已提交的文件 ===')
+        console.log('=== 只读模式（预览）：直接使用已提交的文件 ===')
         console.log('fileUrl:', this.templateUrl)
         this.fileUrl = this.templateUrl
-        // 只读模式不需要documentKey，因为不会保存
-        this.documentKey = 'readonly-' + Date.now()
+        // 只读模式不需要documentKey，因为不会保存，使用一个临时的key即可
+        this.documentKey = 'readonly-preview-' + this.taskId + '-' + Date.now()
+        console.log('临时 documentKey:', this.documentKey)
         this.initEditor()
         return
       }
@@ -364,9 +365,14 @@ export default {
       console.log('=== 开始获取编辑器配置 ===')
       console.log('fileUrl:', this.fileUrl)
       console.log('documentKey:', this.documentKey)
+      console.log('isReadOnly:', this.isReadOnly)
       console.log('调用 getConfig(fileUrl, mode, documentKey)')
 
-      getConfig(this.fileUrl, 'edit', this.documentKey).then(response => {
+      // 根据只读模式决定编辑器模式
+      const editorMode = this.isReadOnly ? 'view' : 'edit'
+      console.log('编辑器模式:', editorMode)
+
+      getConfig(this.fileUrl, editorMode, this.documentKey).then(response => {
         // Response类的code是字符串类型，需要兼容处理
         const code = response.code || response.data?.code
         const isSuccess = code === 200 || code === '200' || response.code === '200'

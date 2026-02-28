@@ -7,7 +7,7 @@ import store from '@/store'
  */
 export function checkPermi(value) {
   if (value && value instanceof Array && value.length > 0) {
-    const permissions = store.getters && store.getters.permissions
+    const permissions = (store.getters && store.getters.permissions) || []
     const permissionDatas = value
     const all_permission = "*:*:*"
 
@@ -30,7 +30,7 @@ export function checkPermi(value) {
  */
 export function checkRole(value) {
   if (value && value instanceof Array && value.length > 0) {
-    const roles = store.getters && store.getters.roles
+    const roles = (store.getters && store.getters.roles) || []
     const permissionRoles = value
     const super_admin = "admin"
 

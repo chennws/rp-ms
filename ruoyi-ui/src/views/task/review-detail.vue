@@ -245,7 +245,7 @@ export default {
       fileUrl: '',
       attachmentOnly: false,
       loading: true,
-      error: null,
+      error: '',
       documentServerUrl: process.env.VUE_APP_DOCUMENT_SERVER_URL || 'http://47.115.163.152:9001/web-apps/apps/api/documents/api.js',
       editorInitRetryCount: 0, // 编辑器初始化重试次数
       maxRetryCount: 30, // 最大重试次数
@@ -318,7 +318,7 @@ export default {
 
         // 重置状态
         this.loading = true
-        this.error = null
+        this.error = ''
         this.editorInitRetryCount = 0
 
         // 更新 submitId
@@ -475,7 +475,7 @@ export default {
 
       this.editorInitializing = true
       this.loading = true
-      this.error = null
+      this.error = ''
 
       console.log('开始初始化 OnlyOffice 编辑器')
       console.log('文档服务器地址:', this.documentServerUrl)
@@ -719,7 +719,7 @@ export default {
     },
     /** 重试初始化 */
     retryInit() {
-      this.error = null
+      this.error = ''
       this.loading = true
       this.editorInitRetryCount = 0 // 重置重试计数器
       this.cancelEditorInit()
